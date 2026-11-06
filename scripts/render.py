@@ -12,6 +12,7 @@ See SKILL.md for the rules this implements.
 """
 import argparse
 import math
+import re
 import signal
 import sys
 from functools import lru_cache
@@ -47,7 +48,8 @@ SAD_FAMILY = set('صض')                      # stretch cleanly into any run end
 STRETCHABLE = set('بپتثنیئفقکگ')            # stretchable only into a word's final letter
 HARAKAT = set(chr(c) for c in range(0x064B, 0x0660)) | {'ٰ'}
 
-W, H, BY = 5000, 800, 480                   # mask canvas (px) and its baseline
+W, H, BY = 5000, 800, 480
+TASHKIL_SCALE = 0.8                         # harakat in a finer pen than the letters                   # mask canvas (px) and its baseline
 
 COLORS = dict(paper='#f3e8d3', ink='#5a1a1f', name='#6e2a2a',
               dpaper='#241a16', dink='#ecd3b2', dname='#d9b48a')
@@ -288,6 +290,8 @@ class Outliner:
         self.order = self.tt.getGlyphOrder()
         self.upem = self.tt['head'].unitsPerEm
         self.feats = {f: True for f in feats}
+        gdef = self.tt['GDEF'].table.GlyphClassDef.classDefs if 'GDEF' in self.tt else {}
+        self.marks = {g for g, c in gdef.items() if c == 3}
 
     def contours(self, placed, px):
         """Every contour of a packed line in font units (y up), components decomposed."""
@@ -304,7 +308,8 @@ class Outliner:
             span = {c: word[c:starts[k + 1]] for k, c in enumerate(starts[:-1])}
             for info, pos in zip(buf.glyph_infos, buf.glyph_positions):
                 rec = DecomposingRecordingPen(self.gs)
-                self.gs[self.order[info.codepoint]].draw(
+                gname = self.order[info.codepoint]
+                self.gs[gname].draw(
                     TransformPen(rec, (1, 0, 0, 1, x + pos.x_offset, y0 + pos.y_offset)))
                 cur = []
                 for op, args in rec.value:
@@ -313,12 +318,20 @@ class Outliner:
                         r = RecordingPen(); r.value = cur; fp = FlatPen(); r.replay(fp); cur = []
                         if fp.polys:
                             items.append(dict(cmds=r.value, poly=Polygon(fp.polys[0]).buffer(0), g=g,
-                                              ch=word[info.cluster], chars=span[info.cluster], word=word, dx=0.0, dy=0.0))
+                                              ch=word[info.cluster], chars=span[info.cluster], word=word,
+                                              mark=gname in self.marks, lig=gname.lower().startswith('lellah'),
+                                              dx=0.0, dy=0.0, sc=1.0, ox=0.0, oy=0.0))
                 g += 1
                 x += pos.x_advance
         for it in items:   # a contour inside a bigger contour of the same glyph is a counter
             it['hole'] = any(o is not it and o['g'] == it['g'] and o['poly'].area > it['poly'].area
                              and o['poly'].contains(it['poly']) for o in items)
+        # tashkil: every contour of a mark glyph, plus the shadda and small alif that the
+        # الله ligature draws inside itself (all its pieces except the body)
+        for it in items:
+            if it['lig'] and not it['hole']:
+                body = max((o for o in items if o['g'] == it['g']), key=lambda o: o['poly'].area)
+                it['mark'] = it is not body
         return items
 
     def reference_dot(self, sample="بنیت تبنی نبتی یبنت بیت نیب"):
@@ -363,6 +376,8 @@ def has_counter(it, items):
 
 def movable(it, glyph, A, Wd, Hd):
     """'dot', 'mark' or None for one contour. glyph = the other contours of its glyph."""
+    if it['mark']:
+        return None                     # tashkil are settled as their own units
     if it['hole'] or not glyph or any(p.distance(it['poly']) == 0 for p in glyph):
         return None                     # touches its own letter: part of the letter
     if is_dot_group(it['poly'], A, Wd, Hd):
@@ -404,6 +419,9 @@ def settle(page, A, Wd, Hd, passes=4, margin=1.4):
         byg.setdefault(i['g'], []).append(i)
     units = {}                                   # (glyph, kind) -> contours moved together
     for it in ink:
+        if it['mark']:
+            units.setdefault((it['g'], 'tashkil'), []).append((it, 'tashkil'))
+            continue
         glyph = [o['poly'] for o in byg[it['g']] if o is not it]
         kind = movable(it, glyph, A, Wd, Hd)
         if kind:
@@ -414,16 +432,52 @@ def settle(page, A, Wd, Hd, passes=4, margin=1.4):
         body = [o['poly'] for o in byg[key[0]] if all(o is not m for m in parts)]
         if body:
             cands.append((parts, members[0][1], unary_union(body)))
+        elif members[0][1] == 'tashkil':   # a mark glyph: no body of its own
+            cands.append((parts, 'tashkil', None))
     union = lambda parts: unary_union([m['poly'] for m in parts])
+    solid = lambda o: o['poly'].area >= 0.8 * A or o['mark']     # ink a dot must clear
+    tclear = 0.4 * Hd                                            # tashkil to any other ink
     moved = {}
     for _ in range(passes):
         changed = False
         for parts, kind, ownu in cands:
             g = parts[0]['g']
-            others = unary_union([o['poly'] for o in ink if o['g'] != g and o['poly'].area >= 0.8 * A])
+            cur = union(parts)
+            if kind == 'tashkil':
+                # clear of all other ink, its own letter included (it is a separate glyph,
+                # or, in الله, a separate piece the font happens to draw close)
+                others = unary_union([o['poly'] for o in ink if all(o is not m for m in parts)
+                                      and (o['poly'].area >= 0.15 * A or o['mark'])])
+                if others.is_empty or others.distance(cur) >= tclear:
+                    continue
+                from shapely.ops import nearest_points
+                pa, pb = nearest_points(others, cur)
+                base = math.degrees(math.atan2(pb.y - pa.y, pb.x - pa.x)) if pa.distance(pb) > 1e-6 \
+                    else (90 if cur.centroid.y > others.centroid.y else -90)
+                best = None
+                # nearest-free direction first, then the rest of the circle (a kasra under a
+                # final م must step past the م's long tail, sideways)
+                for da in [0, 15, -15, 30, -30, 45, -45, 60, -60, 75, -75, 90, -90,
+                           105, -105, 120, -120, 135, -135, 150, -150, 165, -165, 180]:
+                    a = math.radians(base + da); ux, uy = math.cos(a), math.sin(a)
+                    r = 10
+                    while r <= 2.5 * Hd and (best is None or r < best[0]):
+                        if abs(ux * r) <= 1.5 * Wd:
+                            q = affinity.translate(cur, ux * r, uy * r)
+                            if others.distance(q) >= tclear * margin:
+                                best = (r, ux * r, uy * r)
+                                break
+                        r += 10
+                if best is not None:
+                    for m in parts:
+                        m['dx'] += best[1]; m['dy'] += best[2]
+                        m['poly'] = affinity.translate(m['poly'], best[1], best[2])
+                    moved[id(parts[0])] = (kind, ''.join(c for c in parts[0]['chars'] if c in HARAKAT) or parts[0]['ch'],
+                                           parts[0]['word']); changed = True
+                continue
+            others = unary_union([o['poly'] for o in ink if o['g'] != g and solid(o)])
             if others.is_empty:
                 continue
-            cur = union(parts)
             if others.distance(cur) >= clear:
                 continue
             best = None
@@ -461,10 +515,32 @@ def settle(page, A, Wd, Hd, passes=4, margin=1.4):
     unresolved = []
     for parts, kind, ownu in cands:
         g = parts[0]['g']
-        others = unary_union([o['poly'] for o in ink if o['g'] != g and o['poly'].area >= 0.8 * A])
-        if not others.is_empty and others.distance(union(parts)) < clear:
+        if kind == 'tashkil':
+            others = unary_union([o['poly'] for o in ink if all(o is not m for m in parts)
+                                  and (o['poly'].area >= 0.15 * A or o['mark'])])
+            lim = tclear
+        else:
+            others = unary_union([o['poly'] for o in ink if o['g'] != g and solid(o)]); lim = clear
+        if not others.is_empty and others.distance(union(parts)) < lim:
             unresolved.append((kind, parts[0]['ch'], parts[0]['word']))
     return list(moved.values()), unresolved
+
+
+def shrink_tashkil(items, scale):
+    """Draw tashkil a little smaller than the font does, each mark unit (one mark glyph,
+    e.g. a shadda with its vowel) about its own centre: calligraphers write harakat with
+    a finer pen than the letters."""
+    if scale == 1:
+        return
+    units = {}
+    for it in items:
+        if it['mark']:
+            units.setdefault(it['g'], []).append(it)
+    for parts in units.values():
+        c = unary_union([m['poly'] for m in parts]).centroid
+        for m in parts:
+            m['sc'], m['ox'], m['oy'] = scale, c.x, c.y
+            m['poly'] = affinity.scale(m['poly'], scale, scale, origin=(c.x, c.y))
 
 
 def line_svg(items):
@@ -478,7 +554,8 @@ def line_svg(items):
     for it in items:
         pen = pens.setdefault(it['g'], SVGPathPen(None, ntos=lambda v: str(round(v / 10))))
         r = RecordingPen(); r.value = it['cmds']
-        r.replay(TransformPen(pen, (1, 0, 0, -1, it['dx'], -it['dy'])))
+        sc, ox, oy = it['sc'], it['ox'], it['oy']
+        r.replay(TransformPen(pen, (sc, 0, 0, -sc, (1 - sc) * ox + it['dx'], -((1 - sc) * oy + it['dy']))))
     ink = unary_union([i['poly'] for i in items if not i['hole']])
     x0, y0, x1, y1 = ink.bounds
     flipped = affinity.scale(ink, 1, -1, origin=(0, 0))
@@ -499,6 +576,13 @@ def build(style, lines, author=None, rise='strong', cswh=True, keshideh=True,
     A, Wd, Hd = out.reference_dot()
     report = []
     lines = [' '.join(t.split()) for t in lines]
+    if style == 'nastaliq':
+        # IranNastaliq's الله ligature draws its own shadda and small alif; typing them too
+        # stacks a second set on top (a heavy, doubled shadda)
+        fixed = [re.sub('(?<![\u0600-\u06ff])الل[\u064b-\u065f\u0670]+ه', 'الله', t) for t in lines]
+        if fixed != lines:
+            report.append('الله: written plain; the font\'s ligature already carries the shadda and small alif')
+        lines = fixed
     r, start = RISE[rise] if style == 'shekasteh' else (0, 0)
     r = round(r * px / 64)
 
@@ -516,6 +600,7 @@ def build(style, lines, author=None, rise='strong', cswh=True, keshideh=True,
     built, line_items = [], []
     for t, g in zip(lines, gaps):
         items = out.contours(pack_line(mask, t, g, rise=r, start=start), px)
+        shrink_tashkil(items, TASHKIL_SCALE)
         line_items.append(items)
         built.append(line_svg(items))
 

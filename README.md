@@ -19,7 +19,8 @@ engine leaves out:
 - **Fused letter pairs** in Shekasteh (`cswh`), e.g. شک and حک.
 - **Collision fixing**: after the page is laid out, one pass checks every dot, madda and hamza against
   all ink on the page and moves only the ones that collide, just far enough to clear it (a letter's
-  dots move together). Anything it can't clear cleanly is reported, not forced.
+  dots move together). Tashkil go through the same pass, drawn in a slightly finer size and kept
+  clear of all ink. Anything it can't clear cleanly is reported, not forced.
 - **Bayt layout**: staggered misra', a half-size signature (raqam), and light/dark themes in one SVG.
 
 ## Samples
@@ -27,7 +28,7 @@ engine leaves out:
 | | |
 |---|---|
 | **Saadi, Nastaliq** — keshideh on اعضـای<br><img src="samples/saadi-nastaliq.png" alt="Saadi Nastaliq"> | **Saadi, Nastaliq, dark mode**<br><img src="samples/saadi-nastaliq-dark.png" alt="Saadi Nastaliq dark"> |
-| **Rumi, Shekasteh, dark mode**<br><img src="samples/rumi-shekasteh-dark.png" alt="Rumi Shekasteh dark"> | **Bismillah, single centred line** — keshideh on الرحیـم<br><img src="samples/bismillah-nastaliq.png" alt="Bismillah Nastaliq"> |
+| **Rumi, Shekasteh, dark mode**<br><img src="samples/rumi-shekasteh-dark.png" alt="Rumi Shekasteh dark"> | **Bismillah, light tashkil** — بِسمِ الله الرَّحمن الرَّحیم<br><img src="samples/bismillah-nastaliq.png" alt="Bismillah Nastaliq"> |
 
 The SVG source of each sample is in [`samples/`](samples/).
 
