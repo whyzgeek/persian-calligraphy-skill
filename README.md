@@ -13,7 +13,7 @@ engine leaves out:
 
 - **Ink-based word spacing**: words slide together until their *ink* is a fixed distance apart, so
   gaps look even even though word shapes are not.
-- **Keshideh (kashida)** in Nastaliq: one designed long stroke on the last content word of the
+- **Keshideh (kashida)** in Nastaliq: one designed long stroke at the classical place (the letter before a word's final letter, e.g. یکدیگرنـد, الرحیـم) on the
   shorter misra', after which both misra' are matched in length to within about 1%.
 - **Rising line end** in Shekasteh: the line lifts toward its end, as a Shekasteh hand writes.
 - **Fused letter pairs** in Shekasteh (`cswh`), e.g. شک and حک.
@@ -25,7 +25,7 @@ engine leaves out:
 
 | | |
 |---|---|
-| **Saadi, Nastaliq** — keshideh on یکدیگرند<br><img src="samples/saadi-nastaliq.png" alt="Saadi Nastaliq"> | **Saadi, Nastaliq, dark mode**<br><img src="samples/saadi-nastaliq-dark.png" alt="Saadi Nastaliq dark"> |
+| **Saadi, Nastaliq** — keshideh on یکدیگرنـد<br><img src="samples/saadi-nastaliq.png" alt="Saadi Nastaliq"> | **Saadi, Nastaliq, dark mode**<br><img src="samples/saadi-nastaliq-dark.png" alt="Saadi Nastaliq dark"> |
 | **Rumi, Shekasteh, dark mode**<br><img src="samples/rumi-shekasteh-dark.png" alt="Rumi Shekasteh dark"> | **Bismillah, single centred line**<br><img src="samples/bismillah-nastaliq.png" alt="Bismillah Nastaliq"> |
 
 The SVG source of each sample is in [`samples/`](samples/).
@@ -53,9 +53,8 @@ python scripts/render.py --style shekasteh \
 Each run prints what it did:
 
 ```
-  keshideh: misra' 1, word 'نـاولها' (+99%)
-  gaps: 24px / 14px, width diff 0.5%
-  moved in '...کأسا...': mark of أ
+  keshideh: misra' 1, word 'کأسـا' (+95%)
+  gaps: 25px / 14px, width diff 0.4%
 ```
 
 | Option | Effect |

@@ -68,8 +68,9 @@ No font reproduces a calligrapher's hand. Never hand-draw Arabic letters or join
 - **Straight baseline.** Don't lift or drop words; drift looks random in Nastaliq.
 - **Keshideh (tatweel ـ).** A single tatweel at a valid joint makes IranNastaliq substitute a designed long letter.
   - Use exactly one tatweel per word. With two or more, the font falls back to plain letters.
-  - Put it only between letters that join. The non-forward-joiners ا آ أ د ذ ر ز ژ و never connect onward, and nothing joins across a ZWNJ.
-  - Keep it only if the word gets much wider (about +50% or more) and looks right.
+  - **Only at the classical place:** the second-to-last letter of the word's last connected run, stretched into the run's final letter, as in یکدیگرنـد, گوهرنـد, الرحیـم, آفرینـش, کأسـا. For a word ending after a ZWNJ, the run before the ZWNJ also counts (مشکـل‌ها). The stretched letter must have a horizontal body: ب پ ت ث ن ی ئ س ش ص ض ک گ ف ق.
+  - **Never** stretch a word's first letter (نـاولها reads as ن + اولها), ل (الـرحیم looks like a س), ه, ح ج چ خ, م, ع غ, or a letter before a non-final run (a mid-word ک in یکـدیگرند cuts the word in two). If no word has a classical place, give the misra' no keshideh and widen its gaps instead.
+  - Keep it only if the word gets noticeably wider (about +30% or more) and looks right.
   - Use it only on content words, never on particles or one-joint words (به, که, را, و, یا, چه).
   - Allow at most one per misra', on the **last content word**, so the line closes on the long stroke.
   - Use only the length the font's shaping chooses. Swapping in the font's longer glyphs by hand breaks the joins.
@@ -111,7 +112,8 @@ Both fonts draw dots and marks (madda, hamza) inside each letter's glyph, so a n
 
 - **Identify before fixing.** When a user reports a collision, render the word with each contour in its own colour and list each contour's glyph, character, area and bounds (`Outliner.contours`). Don't assume which shape is which: in Dima's آن the diamond is the ن's dot and the madda is a separate wave lying on the ن's swash.
 - **Dot group:** a free contour whose area is within 20% of 1, 2 or 3 dots. One dot's size is learned from the font. A contour with a counter (head of ف), one touching its own letter, or one alone in its glyph is not a dot.
-- **Marks:** only on آ أ إ ؤ ئ ۀ: the free contour of at most ~4 dots' area lying wholly above or below the letter.
+- **Marks:** only on آ أ إ ؤ ئ ۀ: the free contour of at most ~4 dots' area, smaller than half the letter's body, lying wholly above the body (below for إ). In IranNastaliq the alef of أ is a separate contour; moving it instead of the hamza detaches the ا from the ک (کأسا → «ا کسا»).
+- **Stay home.** A moved dot or mark must stay horizontally over its own letter and nearer to it than to any other letter. Otherwise it changes the word: a ن dot pushed over the next د makes گوهرند read «گوهرنز».
 - **Trigger:** closer than half a dot's height to *another* letter's ink (slivers under 0.8 dot are ignored). Distance to its own letter is the designer's choice.
 - **Move** until 1.4 × that clearance away. Dots search the whole circle, starting with the side away from their own letter, and move at most ~1.3 dot heights. Marks search ~3 dot heights, stay near their letter and keep at least 0.3 dot heights from it.
 - **Never make it worse.** If no direction improves the distance, leave the mark where it is.

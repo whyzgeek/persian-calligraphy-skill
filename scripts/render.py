@@ -42,6 +42,7 @@ TATWEEL, ZWNJ = 'ـ', '‌'
 NON_JOINERS = set('اآأإدذرزژوؤ')           # never connect to the next letter
 PARTICLES = {'به', 'که', 'را', 'و', 'یا', 'چه', 'از', 'در', 'با', 'تا', 'بر', 'هر', 'نه', 'گر', 'اگر', 'چو'}
 MARKED = set('آأإؤئۀ')                     # letters that carry a madda or hamza
+STRETCHABLE = set('بپتثنیئسشصضکگفق')        # horizontal-body letters a keshideh can lengthen
 HARAKAT = set(chr(c) for c in range(0x064B, 0x0660)) | {'ٰ'}
 
 W, H, BY = 5000, 800, 480                   # mask canvas (px) and its baseline
@@ -144,25 +145,38 @@ def base_gap(text, px):
 # ---------------------------------------------------------------- keshideh (Nastaliq)
 
 def joints(word):
-    """Indices i where a tatweel may go after word[i] (between two joining letters)."""
-    core = [c for c in word if c not in HARAKAT]
-    if len(core) < 3 or word in PARTICLES or TATWEEL in word:
+    """Where a classical keshideh may go: after the second-to-last letter of the word's
+    final connected run, stretching into its last letter (نـد، یـم، نـش، کـل), and only
+    when that letter has a horizontal body. Returns [index of the letter to stretch]."""
+    if word in PARTICLES or TATWEEL in word:
         return []
-    out = []
-    for i, c in enumerate(word[:-1]):
-        nxt = word[i + 1]
-        if c in HARAKAT or c in NON_JOINERS or c == ZWNJ or nxt == ZWNJ:
+    letters = [(i, c) for i, c in enumerate(word) if c not in HARAKAT]
+    if len(letters) < 3:
+        return []
+    # split into connected runs: a run ends at a non-joiner (which still receives the
+    # join from the letter before it) or at a ZWNJ
+    runs, run, zwnj_before = [], [], []
+    for i, c in letters:
+        if c == ZWNJ:
+            if run:
+                runs.append(run); zwnj_before.append(len(runs) - 1)
+            run = []
             continue
-        if not ('ؠ' <= c <= 'ۿ'):
-            continue
-        # skip over marks to find the next base letter
-        j = i + 1
-        while j < len(word) and word[j] in HARAKAT:
-            j += 1
-        if j >= len(word) or word[j] == ZWNJ:
-            continue
-        out.append(i if j == i + 1 else j - 1)
-    return sorted(set(out))
+        run.append((i, c))
+        if c in NON_JOINERS:
+            runs.append(run); run = []
+    if run:
+        runs.append(run)
+    # the word's last run, else the run closing the part before a ZWNJ (مشکـل‌ها)
+    order = [len(runs) - 1] + [k for k in reversed(zwnj_before) if k != len(runs) - 1]
+    for k in order:
+        r = runs[k]
+        if len(r) >= 2 and r[-2][1] in STRETCHABLE:
+            i = r[-2][0]
+            while i + 1 < len(word) and word[i + 1] in HARAKAT:   # after the letter's marks
+                i += 1
+            return [i]
+    return []
 
 
 def keshideh_options(mask, text):
@@ -175,7 +189,7 @@ def keshideh_options(mask, text):
         for i in joints(w):
             cand = w[:i + 1] + TATWEEL + w[i + 1:]
             gain = mask.width(cand) / max(1, w0)
-            if gain >= 1.5:
+            if gain >= 1.3:
                 opts.append((' '.join(words[:wi] + [cand] + words[wi + 1:]), wi, gain))
     return opts
 
@@ -322,6 +336,14 @@ def other_ink(ink, it, A):
     return unary_union([o['poly'] for o in ink if o['g'] != it['g'] and o['poly'].area >= 0.8 * A])
 
 
+def stays_home(p, ownu, others, Wd):
+    """A moved dot or mark must still read as its own letter's: horizontally over that
+    letter, and nearer to it than to any other letter. Otherwise ن+د can read as ن+ذ."""
+    x0, _, x1, _ = ownu.bounds
+    cx = p.centroid.x
+    return x0 - 0.3 * Wd <= cx <= x1 + 0.3 * Wd and ownu.distance(p) < others.distance(p)
+
+
 def fix_dots(items, A, Wd, Hd, step=10, margin=1.4):
     clear = 0.5 * Hd; target = clear * margin; maxmove = 1.3 * Hd
     ink = [i for i in items if not i['hole']]; moved = []
@@ -337,7 +359,8 @@ def fix_dots(items, A, Wd, Hd, step=10, margin=1.4):
         d0 = others.distance(it['poly'])
         if d0 >= clear:
             continue
-        below = it['poly'].centroid.y < unary_union(own).centroid.y; s = -1 if below else 1
+        ownu = unary_union(own)
+        below = it['poly'].centroid.y < ownu.centroid.y; s = -1 if below else 1
         pref = [(math.sin(math.radians(a)), s * math.cos(math.radians(a))) for a in range(-90, 91, 15)]
         rest = [(math.sin(math.radians(a)), s * math.cos(math.radians(a))) for a in range(105, 271, 15)]
         best = None
@@ -345,7 +368,8 @@ def fix_dots(items, A, Wd, Hd, step=10, margin=1.4):
             for ux, uy in dirs:
                 r = step
                 while r <= maxmove:
-                    if others.distance(affinity.translate(it['poly'], ux * r, uy * r)) >= target:
+                    p = affinity.translate(it['poly'], ux * r, uy * r)
+                    if others.distance(p) >= target and stays_home(p, ownu, others, Wd):
                         if best is None or r < best[0]:
                             best = (r, ux * r, uy * r)
                         break
@@ -353,10 +377,7 @@ def fix_dots(items, A, Wd, Hd, step=10, margin=1.4):
             if best is not None:
                 break
         if best is None:
-            best = max(((maxmove, ux * maxmove, uy * maxmove) for ux, uy in pref + rest),
-                       key=lambda t: others.distance(affinity.translate(it['poly'], t[1], t[2])))
-        if others.distance(affinity.translate(it['poly'], best[1], best[2])) <= d0:
-            continue   # no direction helps: don't trade one crowded spot for another
+            continue   # no move clears it without leaving its letter: keep the designer's spot
         it['dx'], it['dy'] = best[1], best[2]
         it['poly'] = affinity.translate(it['poly'], best[1], best[2]); moved.append((it['ch'], 'dot'))
     return moved
@@ -374,7 +395,13 @@ def fix_marks(items, A, Wd, Hd, step=20, reach=3.0, margin=1.4):
         if not own or any(p.distance(it['poly']) == 0 for p in own):
             continue
         ownu = unary_union(own); mb = it['poly'].bounds; ob = ownu.bounds
-        if not (mb[1] > ob[3] or mb[3] < ob[1]):
+        # the mark is the small piece, on its proper side: below for إ, above for the rest.
+        # (In IranNastaliq the alef of أ is its own contour; never mistake it for the hamza.)
+        body = max(own, key=lambda p: p.area)
+        if it['poly'].area > 0.5 * body.area:
+            continue
+        above, below = mb[1] > ob[3], mb[3] < ob[1]
+        if not ((below and it['ch'] == 'إ') or (above and it['ch'] != 'إ')):
             continue
         others = other_ink(ink, it, A)
         if others.is_empty or others.distance(it['poly']) >= clear:
@@ -389,7 +416,8 @@ def fix_marks(items, A, Wd, Hd, step=20, reach=3.0, margin=1.4):
                 if best and cost >= best[0]:
                     continue
                 p = affinity.translate(it['poly'], dx, dy)
-                if others.distance(p) >= target and ownu.distance(p) >= 0.3 * Hd:
+                if others.distance(p) >= target and ownu.distance(p) >= 0.3 * Hd \
+                        and stays_home(p, ownu, others, Wd):
                     best = (cost, dx, dy)
         if best is None:
             continue
