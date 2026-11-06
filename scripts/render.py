@@ -42,8 +42,8 @@ TATWEEL, ZWNJ = 'ـ', '‌'
 NON_JOINERS = set('اآأإدذرزژوؤ')           # never connect to the next letter
 PARTICLES = {'به', 'که', 'را', 'و', 'یا', 'چه', 'از', 'در', 'با', 'تا', 'بر', 'هر', 'نه', 'گر', 'اگر', 'چو'}
 MARKED = set('آأإؤئۀ')                     # letters that carry a madda or hamza
-SIN_FAMILY = set('سشصض')                    # the classical keshideh letters
-STRETCHABLE = set('بپتثنیئفق')              # also stretchable, but only into a word's final letter
+SAD_FAMILY = set('صض')                      # stretch cleanly into any run end (اعضـای)
+STRETCHABLE = set('بپتثنیئفقکگ')            # stretchable only into a word's final letter
 HARAKAT = set(chr(c) for c in range(0x064B, 0x0660)) | {'ٰ'}
 
 W, H, BY = 5000, 800, 480                   # mask canvas (px) and its baseline
@@ -170,10 +170,11 @@ def joints(word):
 
     A keshideh stretches the second-to-last letter of a connected run into the run's last
     letter, never the word's first letter.
-      tier 1: the sin family (س ش ص ض) at the end of any run: کأسـا، اعضـای.
-      tier 2: ب پ ت ث ن ی ئ ف ق into the word's final letter only: الرحیـم.
-    ک and گ are left alone: IranNastaliq's stretched kaf cuts a word in two (یکـدیگرند),
-    and ل, ه, the ح family, م and ع draw badly stretched (الـرحیم reads as السرحیم)."""
+      tier 1: ص ض at the end of any run: اعضـای.
+      tier 2: ب پ ت ث ن ی ئ ف ق ک گ into the word's final letter only: الرحیـم، مشکـل‌ها.
+    Never س or ش: in Nastaliq the keshideh itself stands for the sin, but IranNastaliq draws
+    the teeth and then the stretch, which reads as sin + keshideh (کأسـا، بسـم).
+    ل, ه, the ح family, م and ع draw badly stretched (الـرحیم reads as السرحیم)."""
     if word in PARTICLES or TATWEEL in word:
         return []
     runs = runs_of(word)
@@ -186,7 +187,8 @@ def joints(word):
         if len(r) < 2 or r[-2][0] == first:
             continue
         i, c = r[-2]
-        tier = 1 if c in SIN_FAMILY else (2 if c in STRETCHABLE and k == len(runs) - 1 else 0)
+        last = k == len(runs) - 1 or word[r[-1][0] + 1:r[-1][0] + 2] == ZWNJ
+        tier = 1 if c in SAD_FAMILY else (2 if c in STRETCHABLE and last else 0)
         if tier:
             while i + 1 < len(word) and word[i + 1] in HARAKAT:   # after the letter's marks
                 i += 1
@@ -373,6 +375,11 @@ def fix_dots(items, A, Wd, Hd, step=10, margin=1.4):
             continue
         others = other_ink(ink, it, A)
         if others.is_empty:
+            continue
+        # the letter's own body is never a dot, even when it is dot-sized: IranNastaliq's ف
+        # head is a separate solid contour of about two dots' area, joined to the next letter.
+        # Moving it lifts the ف off the ر (آفرینش).
+        if it['poly'].area >= max(p.area for p in own) and others.distance(it['poly']) == 0:
             continue
         d0 = others.distance(it['poly'])
         if d0 >= clear:

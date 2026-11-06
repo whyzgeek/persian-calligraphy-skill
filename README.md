@@ -13,7 +13,7 @@ engine leaves out:
 
 - **Ink-based word spacing**: words slide together until their *ink* is a fixed distance apart, so
   gaps look even even though word shapes are not.
-- **Keshideh (kashida)** in Nastaliq: one designed long stroke at a classical place, preferring the sin family (اعضـای, کأسـا, بسـم), on the
+- **Keshideh (kashida)** in Nastaliq: one designed long stroke at a classical place (اعضـای, الرحیـم), never on س/ش, on the
   shorter misra', after which both misra' are matched in length to within about 1%.
 - **Rising line end** in Shekasteh: the line lifts toward its end, as a Shekasteh hand writes.
 - **Fused letter pairs** in Shekasteh (`cswh`), e.g. شک and حک.
@@ -26,7 +26,7 @@ engine leaves out:
 | | |
 |---|---|
 | **Saadi, Nastaliq** — keshideh on اعضـای<br><img src="samples/saadi-nastaliq.png" alt="Saadi Nastaliq"> | **Saadi, Nastaliq, dark mode**<br><img src="samples/saadi-nastaliq-dark.png" alt="Saadi Nastaliq dark"> |
-| **Rumi, Shekasteh, dark mode**<br><img src="samples/rumi-shekasteh-dark.png" alt="Rumi Shekasteh dark"> | **Bismillah, single centred line** — keshideh on بسـم<br><img src="samples/bismillah-nastaliq.png" alt="Bismillah Nastaliq"> |
+| **Rumi, Shekasteh, dark mode**<br><img src="samples/rumi-shekasteh-dark.png" alt="Rumi Shekasteh dark"> | **Bismillah, single centred line** — keshideh on الرحیـم<br><img src="samples/bismillah-nastaliq.png" alt="Bismillah Nastaliq"> |
 
 The SVG source of each sample is in [`samples/`](samples/).
 
@@ -42,8 +42,8 @@ pip install -r requirements.txt
 
 # a bayt: pass each misra' as its own argument
 python scripts/render.py --style nastaliq \
-    "الا یا ایها الساقی ادر کأسا و ناولها" "که عشق آسان نمود اول ولی افتاد مشکل‌ها" \
-    --author "حافظ" -o hafez.svg --png hafez.png
+    "بنی آدم اعضای یکدیگرند" "که در آفرینش ز یک گوهرند" \
+    --author "سعدی" -o saadi.svg --png saadi.png
 
 python scripts/render.py --style shekasteh \
     "بشنو این نی چون شکایت می‌کند" "از جدایی‌ها حکایت می‌کند" \
@@ -53,8 +53,8 @@ python scripts/render.py --style shekasteh \
 Each run prints what it did:
 
 ```
-  keshideh: misra' 1, word 'کأسـا' (+95%)
-  gaps: 25px / 14px, width diff 0.4%
+  keshideh: misra' 1, word 'اعضـای' (+63%)
+  gaps: 15px / 14px, width diff 0.2%
 ```
 
 | Option | Effect |
