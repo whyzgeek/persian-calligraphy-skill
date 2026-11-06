@@ -42,7 +42,8 @@ TATWEEL, ZWNJ = 'ـ', '‌'
 NON_JOINERS = set('اآأإدذرزژوؤ')           # never connect to the next letter
 PARTICLES = {'به', 'که', 'را', 'و', 'یا', 'چه', 'از', 'در', 'با', 'تا', 'بر', 'هر', 'نه', 'گر', 'اگر', 'چو'}
 MARKED = set('آأإؤئۀ')                     # letters that carry a madda or hamza
-STRETCHABLE = set('بپتثنیئسشصضکگفق')        # horizontal-body letters a keshideh can lengthen
+SIN_FAMILY = set('سشصض')                    # the classical keshideh letters
+STRETCHABLE = set('بپتثنیئفق')              # also stretchable, but only into a word's final letter
 HARAKAT = set(chr(c) for c in range(0x064B, 0x0660)) | {'ٰ'}
 
 W, H, BY = 5000, 800, 480                   # mask canvas (px) and its baseline
@@ -144,22 +145,16 @@ def base_gap(text, px):
 
 # ---------------------------------------------------------------- keshideh (Nastaliq)
 
-def joints(word):
-    """Where a classical keshideh may go: after the second-to-last letter of the word's
-    final connected run, stretching into its last letter (نـد، یـم، نـش، کـل), and only
-    when that letter has a horizontal body. Returns [index of the letter to stretch]."""
-    if word in PARTICLES or TATWEEL in word:
-        return []
-    letters = [(i, c) for i, c in enumerate(word) if c not in HARAKAT]
-    if len(letters) < 3:
-        return []
-    # split into connected runs: a run ends at a non-joiner (which still receives the
-    # join from the letter before it) or at a ZWNJ
-    runs, run, zwnj_before = [], [], []
-    for i, c in letters:
+def runs_of(word):
+    """Connected runs of a word as lists of (index, letter). A run ends at a non-joiner
+    (which still receives the join from the letter before it) or at a ZWNJ."""
+    runs, run = [], []
+    for i, c in enumerate(word):
+        if c in HARAKAT:
+            continue
         if c == ZWNJ:
             if run:
-                runs.append(run); zwnj_before.append(len(runs) - 1)
+                runs.append(run)
             run = []
             continue
         run.append((i, c))
@@ -167,36 +162,57 @@ def joints(word):
             runs.append(run); run = []
     if run:
         runs.append(run)
-    # the word's last run, else the run closing the part before a ZWNJ (مشکـل‌ها)
-    order = [len(runs) - 1] + [k for k in reversed(zwnj_before) if k != len(runs) - 1]
-    for k in order:
+    return runs
+
+
+def joints(word):
+    """Classical keshideh places in a word, best first: [(tier, index of the letter to stretch)].
+
+    A keshideh stretches the second-to-last letter of a connected run into the run's last
+    letter, never the word's first letter.
+      tier 1: the sin family (س ش ص ض) at the end of any run: کأسـا، اعضـای.
+      tier 2: ب پ ت ث ن ی ئ ف ق into the word's final letter only: الرحیـم.
+    ک and گ are left alone: IranNastaliq's stretched kaf cuts a word in two (یکـدیگرند),
+    and ل, ه, the ح family, م and ع draw badly stretched (الـرحیم reads as السرحیم)."""
+    if word in PARTICLES or TATWEEL in word:
+        return []
+    runs = runs_of(word)
+    if sum(len(r) for r in runs) < 3:
+        return []
+    first = runs[0][0][0]
+    out = []
+    for k in range(len(runs) - 1, -1, -1):
         r = runs[k]
-        if len(r) >= 2 and r[-2][1] in STRETCHABLE:
-            i = r[-2][0]
+        if len(r) < 2 or r[-2][0] == first:
+            continue
+        i, c = r[-2]
+        tier = 1 if c in SIN_FAMILY else (2 if c in STRETCHABLE and k == len(runs) - 1 else 0)
+        if tier:
             while i + 1 < len(word) and word[i + 1] in HARAKAT:   # after the letter's marks
                 i += 1
-            return [i]
-    return []
+            out.append((tier, i))
+    return out
 
 
 def keshideh_options(mask, text):
-    """[(line_with_tatweel, word_index, gain)] ordered from the last content word back."""
+    """[(line_with_tatweel, word_index, gain)]: tier 1 places first, then tier 2; within a
+    tier, from the last content word back."""
     words = text.split(' ')
     opts = []
     for wi in range(len(words) - 1, -1, -1):
         w = words[wi]
         w0 = mask.width(w)
-        for i in joints(w):
+        for tier, i in joints(w):
             cand = w[:i + 1] + TATWEEL + w[i + 1:]
             gain = mask.width(cand) / max(1, w0)
             if gain >= 1.3:
-                opts.append((' '.join(words[:wi] + [cand] + words[wi + 1:]), wi, gain))
-    return opts
+                opts.append((tier, len(words) - wi, ' '.join(words[:wi] + [cand] + words[wi + 1:]), wi, gain))
+    return [(c, wi, g) for _, _, c, wi, g in sorted(opts, key=lambda o: (o[0], o[1]))]
 
 
-def equalize(mask, lines, px, report):
-    """Give the shorter misra' a keshideh on its last content word, then widen its word gap
-    until both ink widths match (within ~1%)."""
+def equalize(mask, lines, px, report, auto_keshideh=True):
+    """Give the shorter misra' a keshideh on its last content word (if auto_keshideh), then
+    widen its word gap until both ink widths match (within ~1%)."""
     gaps = [base_gap(t, px) for t in lines]
     widths = [ink_width(mask, pack_line(mask, t, g)) for t, g in zip(lines, gaps)]
     short = 0 if widths[0] < widths[1] else 1
@@ -204,13 +220,15 @@ def equalize(mask, lines, px, report):
     target = widths[long_]
     lines = list(lines)
     chosen = None
-    for cand, wi, gain in keshideh_options(mask, lines[short]):
+    for cand, wi, gain in (keshideh_options(mask, lines[short]) if auto_keshideh else []):
         wdt = ink_width(mask, pack_line(mask, cand, gaps[short]))
         if wdt <= target * 1.01:
             chosen = (cand, wi, gain, wdt)
             break
-    if chosen is None:   # the keshideh overshoots on the shorter one; try the other misra'
-        report.append("keshideh: no joint fits the shorter misra'; plain gaps only")
+    if not auto_keshideh:
+        pass
+    elif chosen is None:
+        report.append("keshideh: no classical joint fits the shorter misra'; plain gaps only")
     else:
         lines[short] = chosen[0]
         report.append(f"keshideh: misra' {short + 1}, word '{chosen[0].split(' ')[chosen[1]]}' (+{(chosen[2] - 1) * 100:.0f}%)")
@@ -427,15 +445,21 @@ def fix_marks(items, A, Wd, Hd, step=20, reach=3.0, margin=1.4):
 
 
 def line_svg(items):
-    """Path data (units/10, y down) and ink bounds (full units, y down)."""
-    pen = SVGPathPen(None, ntos=lambda v: str(round(v / 10)))
+    """One path-data string per glyph (units/10, y down) and ink bounds (full units, y down).
+
+    Glyphs must stay separate paths: where two glyphs overlap at a join and their contours
+    wind in opposite directions, a single merged path cancels the overlap under the
+    nonzero rule and leaves a hole (e.g. the join of ف into ر in آفرینش). Rasterizers fill
+    each glyph on its own, so this matches how the font is meant to render."""
+    pens = {}
     for it in items:
+        pen = pens.setdefault(it['g'], SVGPathPen(None, ntos=lambda v: str(round(v / 10))))
         r = RecordingPen(); r.value = it['cmds']
         r.replay(TransformPen(pen, (1, 0, 0, -1, it['dx'], -it['dy'])))
     ink = unary_union([i['poly'] for i in items if not i['hole']])
     x0, y0, x1, y1 = ink.bounds
     flipped = affinity.scale(ink, 1, -1, origin=(0, 0))
-    return pen.getCommands(), (x0, -y1, x1, -y0), flipped
+    return [p.getCommands() for _, p in sorted(pens.items())], (x0, -y1, x1, -y0), flipped
 
 
 # ---------------------------------------------------------------- page layout
@@ -457,14 +481,14 @@ def build(style, lines, author=None, rise='strong', cswh=True, keshideh=True,
 
     gaps = [base_gap(t, px) for t in lines]
     has_manual = any(TATWEEL in t for t in lines)
-    if style == 'nastaliq' and keshideh and not has_manual:
-        if len(lines) == 2 and equal:
-            lines, gaps = equalize(mask, lines, px, report)
-        elif len(lines) == 1:
-            opts = keshideh_options(mask, lines[0])
-            if opts:
-                lines[0] = opts[0][0]
-                report.append(f"keshideh: '{lines[0].split(' ')[opts[0][1]]}'")
+    auto = style == 'nastaliq' and keshideh and not has_manual
+    if style == 'nastaliq' and len(lines) == 2 and equal:
+        lines, gaps = equalize(mask, lines, px, report, auto_keshideh=auto)
+    elif auto and len(lines) == 1:
+        opts = keshideh_options(mask, lines[0])
+        if opts:
+            lines[0] = opts[0][0]
+            report.append(f"keshideh: '{lines[0].split(' ')[opts[0][1]]}'")
 
     built = []
     for t, g in zip(lines, gaps):
@@ -524,8 +548,8 @@ def build(style, lines, author=None, rise='strong', cswh=True, keshideh=True,
            f'<style>{css}</style>',
            f'<rect class="pnl" width="380" height="{Ht}"/>']
     for p in paths:
-        svg.append(f'<path class="{p["cls"]}" transform="translate({p["tx"]:.2f} {p["ty"]:.2f}) '
-                   f'scale({10 * p["s"]:.5f})" d="{p["d"]}"/>')
+        svg.append(f'<g class="{p["cls"]}" transform="translate({p["tx"]:.2f} {p["ty"]:.2f}) '
+                   f'scale({10 * p["s"]:.5f})">' + ''.join(f'<path d="{d}"/>' for d in p['d'] if d) + '</g>')
     svg.append('</svg>')
     return '\n'.join(svg), report
 

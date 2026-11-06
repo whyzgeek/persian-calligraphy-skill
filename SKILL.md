@@ -68,14 +68,14 @@ No font reproduces a calligrapher's hand. Never hand-draw Arabic letters or join
 - **Straight baseline.** Don't lift or drop words; drift looks random in Nastaliq.
 - **Keshideh (tatweel ـ).** A single tatweel at a valid joint makes IranNastaliq substitute a designed long letter.
   - Use exactly one tatweel per word. With two or more, the font falls back to plain letters.
-  - **Only at the classical place:** the second-to-last letter of the word's last connected run, stretched into the run's final letter, as in یکدیگرنـد, گوهرنـد, الرحیـم, آفرینـش, کأسـا. For a word ending after a ZWNJ, the run before the ZWNJ also counts (مشکـل‌ها). The stretched letter must have a horizontal body: ب پ ت ث ن ی ئ س ش ص ض ک گ ف ق.
-  - **Never** stretch a word's first letter (نـاولها reads as ن + اولها), ل (الـرحیم looks like a س), ه, ح ج چ خ, م, ع غ, or a letter before a non-final run (a mid-word ک in یکـدیگرند cuts the word in two). If no word has a classical place, give the misra' no keshideh and widen its gaps instead.
+  - **Where it goes.** A keshideh stretches the second-to-last letter of a connected run into the run's last letter, and never the word's first letter. **First choice: the sin family (س ش ص ض)**, at the end of any run in any word: کأسـا, اعضـای, بسـم. **Fallback:** ب پ ت ث ن ی ئ ف ق, only into the word's final letter: الرحیـم.
+  - **Never** stretch ک or گ (IranNastaliq's long kaf cuts the word, as in یکـدیگرند, and a stretched گ turns یکدیگرند into «یکدیسرند»), a word's first letter (نـاولها reads as ن + اولها), ل (الـرحیم reads as السرحیم), ه, ح ج چ خ, م, or ع غ. A fallback stretch into a short final letter in a long word can also look out of proportion (یکدیگرنـد: the ن loses its tooth and the د shrinks), so prefer a sin-family place anywhere in the misra'. If neither exists, give the misra' no keshideh and widen its gaps instead.
   - Keep it only if the word gets noticeably wider (about +30% or more) and looks right.
   - Use it only on content words, never on particles or one-joint words (به, که, را, و, یا, چه).
-  - Allow at most one per misra', on the **last content word**, so the line closes on the long stroke.
+  - Allow at most one per misra'. Among places of the same kind, prefer the last content word, so the line closes on the long stroke.
   - Use only the length the font's shaping chooses. Swapping in the font's longer glyphs by hand breaks the joins.
-- **Equal misra'.** Pack both misra' plain. Give the shorter one a keshideh on its last content word, then widen only that misra's word gap until both ink widths match within about 1%.
-- **Single line.** One keshideh on the last content word, centred.
+- **Equal misra'.** Pack both misra' plain. Give the shorter one a keshideh (by the rules above), then widen only that misra's word gap until both ink widths match within about 1%. A keshideh typed by hand is kept, and the gaps are still matched.
+- **Single line.** One keshideh by the same rules, centred.
 - `cswh` does almost nothing in IranNastaliq, so leave it off.
 
 ### Shekasteh
@@ -119,6 +119,8 @@ Both fonts draw dots and marks (madda, hamza) inside each letter's glyph, so a n
 - **Never make it worse.** If no direction improves the distance, leave the mark where it is.
 
 ## 7. Layout (viewBox 380 wide)
+
+- **One `<path>` per glyph**, never one merged path per line. At a join, two glyphs overlap; if their contours wind in opposite directions, a merged path cancels the overlap under the nonzero rule and cuts a hole into the join (فر in آفرینش looked broken). Rasterizers fill each glyph on its own, and so must the SVG.
 
 - A full-size paper rect and nothing else behind the text. One scale for all lines: the longest line is 290 wide.
 - **Bayt / multi-line:** line 1 right edge at x=345, ink top at y=48. Line 2 left edge at x=35, 16px below line 1's lowest ink, moved down further until no ink of the two lines is closer than 14px. Further lines alternate the same way.
