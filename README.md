@@ -28,7 +28,7 @@ engine leaves out:
 | | |
 |---|---|
 | **Saadi, Nastaliq** — keshideh on اعضـای<br><img src="samples/saadi-nastaliq.png" alt="Saadi Nastaliq"> | **Saadi, Nastaliq, dark mode**<br><img src="samples/saadi-nastaliq-dark.png" alt="Saadi Nastaliq dark"> |
-| **Rumi, Shekasteh, dark mode**<br><img src="samples/rumi-shekasteh-dark.png" alt="Rumi Shekasteh dark"> | **Bismillah, light tashkil** — بِسمِ الله الرَّحمن الرَّحیم<br><img src="samples/bismillah-nastaliq.png" alt="Bismillah Nastaliq"> |
+| **Rumi, Shekasteh, dark mode**<br><img src="samples/rumi-shekasteh-dark.png" alt="Rumi Shekasteh dark"> | **Bismillah, light tashkil** — بِسمِ الله الرَّحمن الرَّحیم<br><img src="samples/bismillah-tashkil-nastaliq.png" alt="Bismillah Nastaliq"> |
 
 The SVG source of each sample is in [`samples/`](samples/).
 
