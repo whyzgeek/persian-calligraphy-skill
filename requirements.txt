@@ -1,0 +1,6 @@
+pillow>=10.0        # must be built with libraqm (the default wheels are)
+numpy>=1.26
+uharfbuzz>=0.39
+fonttools>=4.40
+shapely>=2.0
+cairosvg>=2.7       # optional: PNG previews (--png)
