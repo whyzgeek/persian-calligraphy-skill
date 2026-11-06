@@ -108,7 +108,7 @@ Every word gets the same space character, but word shapes are uneven, so gaps lo
 
 ## 6. Dots and marks that don't touch other letters
 
-Both fonts draw dots and marks (madda, hamza) inside each letter's glyph, so a neighbouring stroke can land on them. `fix_dots` and `fix_marks` find them and move only the crowded ones.
+Both fonts draw dots and marks (madda, hamza) inside each letter's glyph, so a neighbouring stroke can land on them. **Fix them in one pass over the finished page (`settle`), not word by word:** lay out every line first with all glyphs as the font draws them, then check every dot and mark against all ink on the page (neighbours, other words, the other misra', dots already moved), move only the ones that really collide, and repeat until nothing changes. Per-line rules miss collisions and, when tuned, shift dots elsewhere. To review, render with and without the pass (`--no-dot-fix`) and look at every region that changed.
 
 - **Identify before fixing.** When a user reports a collision, render the word with each contour in its own colour and list each contour's glyph, character, area and bounds (`Outliner.contours`). Don't assume which shape is which: in Dima's آن the diamond is the ن's dot and the madda is a separate wave lying on the ن's swash.
 - **Dot group:** a free contour whose area is within 20% of 1, 2 or 3 dots. One dot's size is learned from the font. A contour with a counter (head of ف), one touching its own letter, or one alone in its glyph is not a dot.
@@ -117,7 +117,8 @@ Both fonts draw dots and marks (madda, hamza) inside each letter's glyph, so a n
 - **Stay home.** A moved dot or mark must stay horizontally over its own letter and get no further from it than it started. Otherwise it changes the word: a ن dot pushed over the next د makes گوهرند read «گوهرنز». Don't require it to be nearer its own letter than to any other: Nastaliq hangs the ی's dots far below its tooth, right on a following ر (آفرینش), and they must still be movable.
 - **Trigger:** closer than half a dot's height to *another* letter's ink (slivers under 0.8 dot are ignored). Distance to its own letter is the designer's choice.
 - **Move** until 1.4 × that clearance away. Dots search the whole circle, starting with the side away from their own letter, and move at most ~1.3 dot heights. Marks search ~3 dot heights, stay near their letter and keep at least 0.3 dot heights from it.
-- **Never make it worse.** If no direction improves the distance, leave the mark where it is.
+- **Move a letter's dots together.** All dots of one letter move as one group and keep their arrangement. Dima draws each dot of ش or ی as its own piece; moving them one by one merges them into a blob.
+- **Never make it worse.** If no move clears it while staying with its letter, leave it where it is; the script reports it as `STILL CROWDED` so you can mention it.
 
 ## 7. Layout (viewBox 380 wide)
 

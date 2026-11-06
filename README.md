@@ -17,8 +17,9 @@ engine leaves out:
   shorter misra', after which both misra' are matched in length to within about 1%.
 - **Rising line end** in Shekasteh: the line lifts toward its end, as a Shekasteh hand writes.
 - **Fused letter pairs** in Shekasteh (`cswh`), e.g. شک and حک.
-- **Collision fixing**: dots, maddas and hamzas that land on a neighbouring letter are moved just far
-  enough to clear it, and are left in place when no move would help.
+- **Collision fixing**: after the page is laid out, one pass checks every dot, madda and hamza against
+  all ink on the page and moves only the ones that collide, just far enough to clear it (a letter's
+  dots move together). Anything it can't clear cleanly is reported, not forced.
 - **Bayt layout**: staggered misra', a half-size signature (raqam), and light/dark themes in one SVG.
 
 ## Samples
@@ -55,6 +56,8 @@ Each run prints what it did:
 ```
   keshideh: misra' 1, word 'اعضـای' (+63%)
   gaps: 15px / 14px, width diff 0.2%
+  moved: dot of ی in یکدیگرند
+  moved: dot of ی in آفرینش
 ```
 
 | Option | Effect |
@@ -65,6 +68,7 @@ Each run prints what it did:
 | `--no-cswh` | Shekasteh: no fused letters (easier to read) |
 | `--no-keshideh` / `--no-equalize` | Nastaliq: no automatic keshideh / don't match the misra' lengths |
 | `--layout auto\|stagger\|center` | `auto`: one line is centred, two or more are staggered |
+| `--no-dot-fix` | leave every dot and mark where the font puts it (to compare) |
 | `--png FILE` `--dark` | PNG preview (light or dark) |
 | `--timeout SECONDS` | hard time limit (default 300) |
 

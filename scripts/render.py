@@ -313,7 +313,7 @@ class Outliner:
                         r = RecordingPen(); r.value = cur; fp = FlatPen(); r.replay(fp); cur = []
                         if fp.polys:
                             items.append(dict(cmds=r.value, poly=Polygon(fp.polys[0]).buffer(0), g=g,
-                                              ch=word[info.cluster], chars=span[info.cluster], dx=0.0, dy=0.0))
+                                              ch=word[info.cluster], chars=span[info.cluster], word=word, dx=0.0, dy=0.0))
                 g += 1
                 x += pos.x_advance
         for it in items:   # a contour inside a bigger contour of the same glyph is a counter
@@ -354,107 +354,117 @@ def has_counter(it, items):
                for h in items)
 
 
-def other_ink(ink, it, A):
-    """Other letters' ink to clear; slivers under 0.8 dot are decorative and ignored."""
-    return unary_union([o['poly'] for o in ink if o['g'] != it['g'] and o['poly'].area >= 0.8 * A])
+# ---------------------------------------------------------------- page-level dot pass
+#
+# Dots and marks are settled once, after the whole page is laid out: every dot and mark is
+# checked against all ink on the page (its neighbours, other words, the other misra'), and
+# only the ones that actually crowd something are moved, by the smallest move that clears
+# everything, with already-moved dots counted as ink. Passes repeat until nothing changes.
 
-
-def stays_home(p, orig, ownu, Wd, Hd):
-    """A moved dot or mark must still read as its own letter's: horizontally over that
-    letter, and no further from it than it started (plus a little). Otherwise a ن dot
-    pushed over the next د makes گوهرند read «گوهرنز». (Not "nearer to its own letter than
-    to any other": Nastaliq hangs the dots of ی far below its tooth, right on a following ر.)"""
-    x0, _, x1, _ = ownu.bounds
-    cx = p.centroid.x
-    return x0 - 0.3 * Wd <= cx <= x1 + 0.3 * Wd and ownu.distance(p) <= ownu.distance(orig) + 0.5 * Hd
-
-
-def fix_dots(items, A, Wd, Hd, step=10, margin=1.4):
-    clear = 0.5 * Hd; target = clear * margin; maxmove = 1.3 * Hd
-    ink = [i for i in items if not i['hole']]; moved = []
-    for it in ink:
-        if not is_dot_group(it['poly'], A, Wd, Hd) or has_counter(it, items):
-            continue
-        # a dot group can't hold more dots than its letter has. This keeps letter bodies
-        # out: IranNastaliq's solid ف head is about two dots in size, but ف has one dot,
-        # so it is the head (moving it lifted the ف off the ر in آفرینش). The two dots of
-        # ی are one contour and stay eligible.
-        if round(it['poly'].area / A) > sum(DOTS.get(c, 0) for c in it['chars']):
-            continue
-        own = [o['poly'] for o in ink if o['g'] == it['g'] and o is not it]
-        if not own or any(p.distance(it['poly']) == 0 for p in own):
-            continue
-        others = other_ink(ink, it, A)
-        if others.is_empty:
-            continue
-        d0 = others.distance(it['poly'])
-        if d0 >= clear:
-            continue
-        ownu = unary_union(own)
-        below = it['poly'].centroid.y < ownu.centroid.y; s = -1 if below else 1
-        pref = [(math.sin(math.radians(a)), s * math.cos(math.radians(a))) for a in range(-90, 91, 15)]
-        rest = [(math.sin(math.radians(a)), s * math.cos(math.radians(a))) for a in range(105, 271, 15)]
-        best = None
-        for dirs in (pref, rest):
-            for ux, uy in dirs:
-                r = step
-                while r <= maxmove:
-                    p = affinity.translate(it['poly'], ux * r, uy * r)
-                    if others.distance(p) >= target and stays_home(p, it['poly'], ownu, Wd, Hd):
-                        if best is None or r < best[0]:
-                            best = (r, ux * r, uy * r)
-                        break
-                    r += step
-            if best is not None:
-                break
-        if best is None:
-            continue   # no move clears it without leaving its letter: keep the designer's spot
-        it['dx'], it['dy'] = best[1], best[2]
-        it['poly'] = affinity.translate(it['poly'], best[1], best[2]); moved.append((it['ch'], 'dot'))
-    return moved
-
-
-def fix_marks(items, A, Wd, Hd, step=20, reach=3.0, margin=1.4):
-    """Madda/hamza of آ أ إ ؤ ئ ۀ lying on another letter: smallest nearby move that clears it."""
-    clear = 0.5 * Hd; target = clear * margin
-    ink = [i for i in items if not i['hole']]; moved = []
-    for it in ink:
-        if it['ch'] not in MARKED or it['poly'].area > 4 * A or is_dot_group(it['poly'], A, Wd, Hd) \
-                or has_counter(it, items):
-            continue
-        own = [o['poly'] for o in ink if o['g'] == it['g'] and o is not it]
-        if not own or any(p.distance(it['poly']) == 0 for p in own):
-            continue
-        ownu = unary_union(own); mb = it['poly'].bounds; ob = ownu.bounds
-        # the mark is the small piece, on its proper side: below for إ, above for the rest.
-        # (In IranNastaliq the alef of أ is its own contour; never mistake it for the hamza.)
-        body = max(own, key=lambda p: p.area)
-        if it['poly'].area > 0.5 * body.area:
-            continue
+def movable(it, glyph, A, Wd, Hd):
+    """'dot', 'mark' or None for one contour. glyph = the other contours of its glyph."""
+    if it['hole'] or not glyph or any(p.distance(it['poly']) == 0 for p in glyph):
+        return None                     # touches its own letter: part of the letter
+    if is_dot_group(it['poly'], A, Wd, Hd):
+        # no more dots than the letter has: IranNastaliq's solid ف head is two dots in
+        # size, but ف has one dot, so it is the head (moving it lifts ف off the ر).
+        # The ی dot pair is one contour, larger than the ی tooth, and stays movable.
+        return 'dot' if round(it['poly'].area / A) <= sum(DOTS.get(c, 0) for c in it['chars']) else None
+    if it['ch'] in MARKED and it['poly'].area <= 4 * A:
+        body = max(glyph, key=lambda p: p.area)
+        if it['poly'].area > 0.5 * body.area:     # IranNastaliq's alef of أ is its own contour
+            return None
+        mb, ob = it['poly'].bounds, unary_union(glyph).bounds
         above, below = mb[1] > ob[3], mb[3] < ob[1]
-        if not ((below and it['ch'] == 'إ') or (above and it['ch'] != 'إ')):
-            continue
-        others = other_ink(ink, it, A)
-        if others.is_empty or others.distance(it['poly']) >= clear:
-            continue
-        cx = it['poly'].centroid.x; ocx = ownu.centroid.x; R = reach * Hd; n = int(R // step); best = None
-        for i in range(-n, n + 1):
-            for j in range(-n, n + 1):
-                dx, dy = i * step, j * step; r = math.hypot(dx, dy)
-                if r > R:
-                    continue
-                cost = r + 0.5 * abs(cx + dx - ocx)
-                if best and cost >= best[0]:
-                    continue
-                p = affinity.translate(it['poly'], dx, dy)
-                if others.distance(p) >= target and ownu.distance(p) >= 0.3 * Hd \
-                        and stays_home(p, it['poly'], ownu, Wd, Hd):
-                    best = (cost, dx, dy)
-        if best is None:
-            continue
-        it['dx'] += best[1]; it['dy'] += best[2]
-        it['poly'] = affinity.translate(it['poly'], best[1], best[2]); moved.append((it['ch'], 'mark'))
-    return moved
+        if (below and it['ch'] == 'إ') or (above and it['ch'] != 'إ'):
+            return 'mark'
+    return None
+
+
+def home(p, orig, ownu, Wd, Hd):
+    """A moved dot or mark still reads as its own letter's: horizontally over that letter,
+    and no further from it than it started. (A ن dot pushed over the next د would make
+    گوهرند read «گوهرنز».)"""
+    x0, _, x1, _ = ownu.bounds
+    return x0 - 0.3 * Wd <= p.centroid.x <= x1 + 0.3 * Wd and \
+        ownu.distance(p) <= ownu.distance(orig) + 0.5 * Hd
+
+
+def settle(page, A, Wd, Hd, passes=4, margin=1.4):
+    """page: list of contour dicts in one coordinate space, each with a page-unique 'g'.
+    Moves crowded dots and marks in place (updating 'poly', 'dx', 'dy').
+
+    A letter's dots move together as one group, keeping their arrangement (Dima draws each
+    dot of ش or ی as its own piece; moving them one by one can merge them into a blob).
+    Returns (moved, unresolved) as lists of (kind, letter, word)."""
+    clear = 0.5 * Hd; target = clear * margin
+    ink = [i for i in page if not i['hole']]
+    byg = {}
+    for i in ink:
+        byg.setdefault(i['g'], []).append(i)
+    units = {}                                   # (glyph, kind) -> contours moved together
+    for it in ink:
+        glyph = [o['poly'] for o in byg[it['g']] if o is not it]
+        kind = movable(it, glyph, A, Wd, Hd)
+        if kind:
+            units.setdefault((it['g'], kind if kind == 'dot' else id(it)), []).append((it, kind))
+    cands = []
+    for key, members in units.items():
+        parts = [m for m, _ in members]
+        body = [o['poly'] for o in byg[key[0]] if all(o is not m for m in parts)]
+        if body:
+            cands.append((parts, members[0][1], unary_union(body)))
+    union = lambda parts: unary_union([m['poly'] for m in parts])
+    moved = {}
+    for _ in range(passes):
+        changed = False
+        for parts, kind, ownu in cands:
+            g = parts[0]['g']
+            others = unary_union([o['poly'] for o in ink if o['g'] != g and o['poly'].area >= 0.8 * A])
+            if others.is_empty:
+                continue
+            cur = union(parts)
+            if others.distance(cur) >= clear:
+                continue
+            best = None
+            if kind == 'dot':
+                below = cur.centroid.y < ownu.centroid.y; sg = -1 if below else 1
+                for a in list(range(-90, 91, 15)) + list(range(105, 271, 15)):   # away from its letter first
+                    ux, uy = math.sin(math.radians(a)), sg * math.cos(math.radians(a))
+                    r = 10
+                    while r <= 1.3 * Hd and (best is None or r < best[0]):
+                        q = affinity.translate(cur, ux * r, uy * r)
+                        if others.distance(q) >= target and home(q, cur, ownu, Wd, Hd):
+                            best = (r, ux * r, uy * r)
+                            break
+                        r += 10
+            else:
+                cx, ocx = cur.centroid.x, ownu.centroid.x; R = 3 * Hd; n = int(R // 20)
+                for i in range(-n, n + 1):
+                    for j in range(-n, n + 1):
+                        dx, dy = i * 20, j * 20; r = math.hypot(dx, dy)
+                        cost = r + 0.5 * abs(cx + dx - ocx)
+                        if r > R or (best and cost >= best[0]):
+                            continue
+                        q = affinity.translate(cur, dx, dy)
+                        if others.distance(q) >= target and ownu.distance(q) >= 0.3 * Hd \
+                                and home(q, cur, ownu, Wd, Hd):
+                            best = (cost, dx, dy)
+            if best is None:
+                continue
+            for m in parts:
+                m['dx'] += best[1]; m['dy'] += best[2]
+                m['poly'] = affinity.translate(m['poly'], best[1], best[2])
+            moved[id(parts[0])] = (kind, parts[0]['ch'], parts[0]['word']); changed = True
+        if not changed:
+            break
+    unresolved = []
+    for parts, kind, ownu in cands:
+        g = parts[0]['g']
+        others = unary_union([o['poly'] for o in ink if o['g'] != g and o['poly'].area >= 0.8 * A])
+        if not others.is_empty and others.distance(union(parts)) < clear:
+            unresolved.append((kind, parts[0]['ch'], parts[0]['word']))
+    return list(moved.values()), unresolved
 
 
 def line_svg(items):
@@ -478,7 +488,7 @@ def line_svg(items):
 # ---------------------------------------------------------------- page layout
 
 def build(style, lines, author=None, rise='strong', cswh=True, keshideh=True,
-          equal=True, layout='auto', title='', desc=''):
+          equal=True, layout='auto', title='', desc='', dot_fix=True):
     font = FONTS[style]
     if not font.exists():
         sys.exit(f'missing font {font}')
@@ -503,13 +513,10 @@ def build(style, lines, author=None, rise='strong', cswh=True, keshideh=True,
             lines[0] = opts[0][0]
             report.append(f"keshideh: '{lines[0].split(' ')[opts[0][1]]}'")
 
-    built = []
+    built, line_items = [], []
     for t, g in zip(lines, gaps):
-        placed = pack_line(mask, t, g, rise=r, start=start)
-        items = out.contours(placed, px)
-        mv = fix_dots(items, A, Wd, Hd) + fix_marks(items, A, Wd, Hd)
-        if mv:
-            report.append(f"moved in '{t}': " + ', '.join(f'{k} of {c}' for c, k in mv))
+        items = out.contours(pack_line(mask, t, g, rise=r, start=start), px)
+        line_items.append(items)
         built.append(line_svg(items))
 
     s = 290 / max(b[2] - b[0] for _, b, _ in built)
@@ -532,20 +539,39 @@ def build(style, lines, author=None, rise='strong', cswh=True, keshideh=True,
                     break
                 ty += 1
         cur = affinity.affine_transform(poly, [s, 0, 0, s, tx, ty])
-        prev = dict(d=d, tx=tx, ty=ty, s=s, cls='ink', bottom=ty + y1 * s, poly=cur)
+        prev = dict(d=d, tx=tx, ty=ty, s=s, cls='ink', bottom=ty + y1 * s, poly=cur, items=line_items[k])
         placed_lines.append(prev)
 
     bottom = max(p['bottom'] for p in placed_lines)
     paths = list(placed_lines)
     if author:
         a_items = out.contours(pack_line(mask, ' '.join(author.split()), base_gap(author, px)), px)
-        fix_dots(a_items, A, Wd, Hd); fix_marks(a_items, A, Wd, Hd)
         d, (x0, y0, x1, y1), _ = line_svg(a_items)
         sn = s / 2
         tx = 345 - x1 * sn; ty = bottom + 20 - y0 * sn
-        paths.append(dict(d=d, tx=tx, ty=ty, s=sn, cls='nm'))
+        paths.append(dict(d=d, tx=tx, ty=ty, s=sn, cls='nm', items=a_items))
         bottom = ty + y1 * sn
     Ht = math.ceil(bottom + 44)
+
+    # settle dots and marks once, over the whole page, in body font units (y up)
+    page = []
+    for k, p in enumerate(paths):
+        f = p['s'] / s
+        for it in p['items']:
+            gi = dict(it, g=(k, it['g']), src=it, f=f, dx=0.0, dy=0.0)
+            gi['poly'] = affinity.translate(affinity.scale(it['poly'], f, f, origin=(0, 0)),
+                                            p['tx'] / s, -p['ty'] / s)
+            page.append(gi)
+    moved, unresolved = settle(page, A, Wd, Hd) if dot_fix else ([], [])
+    for gi in page:
+        if gi['dx'] or gi['dy']:
+            gi['src']['dx'] += gi['dx'] / gi['f']; gi['src']['dy'] += gi['dy'] / gi['f']
+    for p in paths:
+        p['d'] = line_svg(p['items'])[0]
+    for kind, ch, word in moved:
+        report.append(f"moved: {kind} of {ch} in {word}")
+    for kind, ch, word in unresolved:
+        report.append(f"STILL CROWDED (no clean move found): {kind} of {ch} in {word}")
 
     c = COLORS
     css = (f".pnl{{fill:{c['paper']}}}.ink{{fill:{c['ink']}}}.nm{{fill:{c['name']}}}"
@@ -577,6 +603,7 @@ def main():
     ap.add_argument('--no-keshideh', action='store_true', help='Nastaliq: no automatic keshideh')
     ap.add_argument('--no-equalize', action='store_true', help="don't match the two misra' lengths")
     ap.add_argument('--layout', choices=['auto', 'stagger', 'center'], default='auto')
+    ap.add_argument('--no-dot-fix', action='store_true', help='leave every dot and mark where the font puts it')
     ap.add_argument('--title', default='')
     ap.add_argument('--desc', default='')
     ap.add_argument('-o', '--out', required=True, help='output .svg')
@@ -589,7 +616,7 @@ def main():
     signal.alarm(a.timeout)
 
     svg, report = build(a.style, a.lines, a.author, a.rise, not a.no_cswh, not a.no_keshideh,
-                        not a.no_equalize, a.layout, a.title, a.desc)
+                        not a.no_equalize, a.layout, a.title, a.desc, not a.no_dot_fix)
     Path(a.out).write_text(svg, encoding='utf-8')
     print(f'wrote {a.out}')
     if a.png:
