@@ -41,6 +41,7 @@ RISE = {'flat': (0, 0), 'gentle': (24, .45), 'medium': (40, .40), 'strong': (56,
 TATWEEL, ZWNJ = 'ـ', '‌'
 NON_JOINERS = set('اآأإدذرزژوؤ')           # never connect to the next letter
 PARTICLES = {'به', 'که', 'را', 'و', 'یا', 'چه', 'از', 'در', 'با', 'تا', 'بر', 'هر', 'نه', 'گر', 'اگر', 'چو'}
+DOTS = dict(zip('بپتثجچخذزژشضظغفقنیيةک', [1, 3, 2, 3, 1, 3, 1, 1, 1, 3, 3, 1, 1, 1, 1, 2, 1, 2, 2, 2, 0]))
 MARKED = set('آأإؤئۀ')                     # letters that carry a madda or hamza
 SAD_FAMILY = set('صض')                      # stretch cleanly into any run end (اعضـای)
 STRETCHABLE = set('بپتثنیئفقکگ')            # stretchable only into a word's final letter
@@ -299,6 +300,8 @@ class Outliner:
             hb.shape(self.hf, buf, self.feats)
             x = xpx * self.upem / px
             y0 = -dypx * self.upem / px
+            starts = sorted({i.cluster for i in buf.glyph_infos}) + [len(word)]
+            span = {c: word[c:starts[k + 1]] for k, c in enumerate(starts[:-1])}
             for info, pos in zip(buf.glyph_infos, buf.glyph_positions):
                 rec = DecomposingRecordingPen(self.gs)
                 self.gs[self.order[info.codepoint]].draw(
@@ -310,7 +313,7 @@ class Outliner:
                         r = RecordingPen(); r.value = cur; fp = FlatPen(); r.replay(fp); cur = []
                         if fp.polys:
                             items.append(dict(cmds=r.value, poly=Polygon(fp.polys[0]).buffer(0), g=g,
-                                              ch=word[info.cluster], dx=0.0, dy=0.0))
+                                              ch=word[info.cluster], chars=span[info.cluster], dx=0.0, dy=0.0))
                 g += 1
                 x += pos.x_advance
         for it in items:   # a contour inside a bigger contour of the same glyph is a counter
@@ -356,12 +359,14 @@ def other_ink(ink, it, A):
     return unary_union([o['poly'] for o in ink if o['g'] != it['g'] and o['poly'].area >= 0.8 * A])
 
 
-def stays_home(p, ownu, others, Wd):
+def stays_home(p, orig, ownu, Wd, Hd):
     """A moved dot or mark must still read as its own letter's: horizontally over that
-    letter, and nearer to it than to any other letter. Otherwise ن+د can read as ن+ذ."""
+    letter, and no further from it than it started (plus a little). Otherwise a ن dot
+    pushed over the next د makes گوهرند read «گوهرنز». (Not "nearer to its own letter than
+    to any other": Nastaliq hangs the dots of ی far below its tooth, right on a following ر.)"""
     x0, _, x1, _ = ownu.bounds
     cx = p.centroid.x
-    return x0 - 0.3 * Wd <= cx <= x1 + 0.3 * Wd and ownu.distance(p) < others.distance(p)
+    return x0 - 0.3 * Wd <= cx <= x1 + 0.3 * Wd and ownu.distance(p) <= ownu.distance(orig) + 0.5 * Hd
 
 
 def fix_dots(items, A, Wd, Hd, step=10, margin=1.4):
@@ -370,16 +375,17 @@ def fix_dots(items, A, Wd, Hd, step=10, margin=1.4):
     for it in ink:
         if not is_dot_group(it['poly'], A, Wd, Hd) or has_counter(it, items):
             continue
+        # a dot group can't hold more dots than its letter has. This keeps letter bodies
+        # out: IranNastaliq's solid ف head is about two dots in size, but ف has one dot,
+        # so it is the head (moving it lifted the ف off the ر in آفرینش). The two dots of
+        # ی are one contour and stay eligible.
+        if round(it['poly'].area / A) > sum(DOTS.get(c, 0) for c in it['chars']):
+            continue
         own = [o['poly'] for o in ink if o['g'] == it['g'] and o is not it]
         if not own or any(p.distance(it['poly']) == 0 for p in own):
             continue
         others = other_ink(ink, it, A)
         if others.is_empty:
-            continue
-        # the letter's own body is never a dot, even when it is dot-sized: IranNastaliq's ف
-        # head is a separate solid contour of about two dots' area, joined to the next letter.
-        # Moving it lifts the ف off the ر (آفرینش).
-        if it['poly'].area >= max(p.area for p in own) and others.distance(it['poly']) == 0:
             continue
         d0 = others.distance(it['poly'])
         if d0 >= clear:
@@ -394,7 +400,7 @@ def fix_dots(items, A, Wd, Hd, step=10, margin=1.4):
                 r = step
                 while r <= maxmove:
                     p = affinity.translate(it['poly'], ux * r, uy * r)
-                    if others.distance(p) >= target and stays_home(p, ownu, others, Wd):
+                    if others.distance(p) >= target and stays_home(p, it['poly'], ownu, Wd, Hd):
                         if best is None or r < best[0]:
                             best = (r, ux * r, uy * r)
                         break
@@ -442,7 +448,7 @@ def fix_marks(items, A, Wd, Hd, step=20, reach=3.0, margin=1.4):
                     continue
                 p = affinity.translate(it['poly'], dx, dy)
                 if others.distance(p) >= target and ownu.distance(p) >= 0.3 * Hd \
-                        and stays_home(p, ownu, others, Wd):
+                        and stays_home(p, it['poly'], ownu, Wd, Hd):
                     best = (cost, dx, dy)
         if best is None:
             continue
