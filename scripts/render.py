@@ -49,6 +49,8 @@ STRETCHABLE = set('بپتثنیئفقکگ')            # stretchable only into a
 HARAKAT = set(chr(c) for c in range(0x064B, 0x0660)) | {'ٰ'}
 
 W, H, BY = 5000, 800, 480
+# --mashq: climb per px, word-gap factor, tuck, line clearance (page px), dot clearance (dot heights)
+MASHQ = dict(slope=0.24, gap=0.6, tuck=0.6, lead=14, room=0.9)
 TASHKIL_SCALE = 0.8                         # harakat in a finer pen than the letters                   # mask canvas (px) and its baseline
 
 COLORS = dict(paper='#f3e8d3', ink='#5a1a1f', name='#6e2a2a',
@@ -89,7 +91,10 @@ class Masker:
         return int(cols[-1] - cols[0]) if len(cols) else 0
 
 
-def lifts(mask, words, rise, start):
+def lifts(mask, words, rise, start, slope=0):
+    if slope:   # mashq: a steady diagonal climb from the first word to the last
+        wid = [max(1, mask.width(w)) for w in words]
+        return [-round(slope * (sum(wid[:k]) + (wd - wid[0]) / 2)) for k, wd in enumerate(wid)]
     if not rise:
         return [0] * len(words)
     wid = [max(1, mask.width(w)) for w in words]
@@ -101,12 +106,12 @@ def lifts(mask, words, rise, start):
     return out
 
 
-def pack_line(mask, text, clear, rise=0, start=0.35, maxtuck=0.35):
+def pack_line(mask, text, clear, rise=0, start=0.35, maxtuck=0.35, slope=0):
     """Place words right to left, each sliding in until its ink is `clear` px from the
     text already placed. Returns [(word, x_px, dy_px)]; dy negative = up."""
     words = text.split(' ')
     out, acc = [], None
-    for w, dy in zip(words, lifts(mask, words, rise, start)):
+    for w, dy in zip(words, lifts(mask, words, rise, start, slope)):
         m = mask(w, 0, dy)
         cols = np.where(m.any(0))[0]
         wx0, wx1 = cols[0], cols[-1]
@@ -396,23 +401,23 @@ def movable(it, glyph, A, Wd, Hd):
     return None
 
 
-def home(p, orig, ownu, Wd, Hd):
+def home(p, orig, ownu, Wd, Hd, slack=0.5):
     """A moved dot or mark still reads as its own letter's: horizontally over that letter,
     and no further from it than it started. (A ن dot pushed over the next د would make
     گوهرند read «گوهرنز».)"""
     x0, _, x1, _ = ownu.bounds
     return x0 - 0.3 * Wd <= p.centroid.x <= x1 + 0.3 * Wd and \
-        ownu.distance(p) <= ownu.distance(orig) + 0.5 * Hd
+        ownu.distance(p) <= ownu.distance(orig) + slack * Hd
 
 
-def settle(page, A, Wd, Hd, passes=4, margin=1.4):
+def settle(page, A, Wd, Hd, passes=4, margin=1.4, room=0.5):
     """page: list of contour dicts in one coordinate space, each with a page-unique 'g'.
     Moves crowded dots and marks in place (updating 'poly', 'dx', 'dy').
 
     A letter's dots move together as one group, keeping their arrangement (Dima draws each
     dot of ش or ی as its own piece; moving them one by one can merge them into a blob).
     Returns (moved, unresolved) as lists of (kind, letter, word)."""
-    clear = 0.5 * Hd; target = clear * margin
+    clear = room * Hd; target = clear * margin
     ink = [i for i in page if not i['hole']]
     byg = {}
     for i in ink:
@@ -435,7 +440,7 @@ def settle(page, A, Wd, Hd, passes=4, margin=1.4):
         elif members[0][1] == 'tashkil':   # a mark glyph: no body of its own
             cands.append((parts, 'tashkil', None))
     union = lambda parts: unary_union([m['poly'] for m in parts])
-    solid = lambda o: o['poly'].area >= 0.8 * A or o['mark']     # ink a dot must clear
+    solid = lambda o: o['poly'].area >= 0.5 * A or o['mark']     # ink a dot must clear (Dima's ب dot is 0.74 A)
     tclear = 0.4 * Hd                                            # tashkil to any other ink
     moved = {}
     for _ in range(passes):
@@ -512,6 +517,32 @@ def settle(page, A, Wd, Hd, passes=4, margin=1.4):
             moved[id(parts[0])] = (kind, parts[0]['ch'], parts[0]['word']); changed = True
         if not changed:
             break
+    # last resort, only for dots that still sit on ink (Dima draws the ت dots of نیستان on
+    # the sweep of its final ن): hop over the stroke, up to 2.5 dot heights, still over
+    # the dot's own letter
+    for parts, kind, ownu in cands:
+        if kind != 'dot':
+            continue
+        g = parts[0]['g']; cur = union(parts)
+        others = unary_union([o['poly'] for o in ink if o['g'] != g and solid(o)])
+        if others.is_empty or others.distance(cur) >= 0.15 * Hd:
+            continue
+        best = None
+        for a in range(0, 360, 15):
+            ux, uy = math.sin(math.radians(a)), math.cos(math.radians(a))
+            r = 10
+            while r <= 2.5 * Hd and (best is None or r < best[0]):
+                q = affinity.translate(cur, ux * r, uy * r)
+                if others.distance(q) >= clear and ownu.distance(q) >= 0.2 * Hd \
+                        and home(q, cur, ownu, Wd, Hd, slack=2.0):
+                    best = (r, ux * r, uy * r)
+                    break
+                r += 10
+        if best:
+            for m in parts:
+                m['dx'] += best[1]; m['dy'] += best[2]
+                m['poly'] = affinity.translate(m['poly'], best[1], best[2])
+            moved[id(parts[0])] = (kind, parts[0]['ch'], parts[0]['word'])
     unresolved = []
     for parts, kind, ownu in cands:
         g = parts[0]['g']
@@ -524,6 +555,107 @@ def settle(page, A, Wd, Hd, passes=4, margin=1.4):
         if not others.is_empty and others.distance(union(parts)) < lim:
             unresolved.append((kind, parts[0]['ch'], parts[0]['word']))
     return list(moved.values()), unresolved
+
+
+def spread_dots(page, A, Wd, Hd, cap=1.6, gain=0.25):
+    """Mashq only: after the collision pass, let each letter's dots drift into the open
+    space around them, as a calligrapher spaces dots to balance the white of the page.
+    A dot group drifts mostly vertically (at most a quarter dot width sideways, so it never
+    slides onto the next letter: شکایت must not read «سکاثت»), stays on the same side of
+    its letter, may move at most 1.5 dot heights further out, and moves only when that clears
+    it from other ink by a real margin. Returns [(kind, letter, word)]."""
+    ink = [i for i in page if not i['hole']]
+    byg = {}
+    for i in ink:
+        byg.setdefault(i['g'], []).append(i)
+    units = {}
+    for it in ink:
+        if it['mark']:
+            continue
+        glyph = [o['poly'] for o in byg[it['g']] if o is not it]
+        if movable(it, glyph, A, Wd, Hd) == 'dot':
+            units.setdefault(it['g'], []).append(it)
+    moved = []
+    for g, parts in units.items():
+        body = [o['poly'] for o in byg[g] if all(o is not m for m in parts)]
+        if not body:
+            continue
+        ownu = unary_union(body)
+        cur = unary_union([m['poly'] for m in parts])
+        bx = cur.bounds; R = 3 * Hd
+        near = [o['poly'] for o in ink if o['g'] != g and (o['poly'].area >= 0.8 * A or o['mark'])
+                and o['poly'].bounds[2] > bx[0] - R and o['poly'].bounds[0] < bx[2] + R
+                and o['poly'].bounds[3] > bx[1] - R and o['poly'].bounds[1] < bx[3] + R]
+        others = unary_union(near) if near else None
+        clear = lambda q: min(others.distance(q) if others is not None else cap * Hd, cap * Hd)
+        up = cur.centroid.y >= ownu.centroid.y
+        d0 = ownu.distance(cur)
+        x0, _, x1, _ = ownu.bounds
+        base = clear(cur); best = (base, 0, 0)
+        step = Hd / 4
+        for i in range(-2, 3):
+            for j in range(0, 7):
+                dx, dy = i * Wd / 8, (j if up else -j) * step
+                if not (dx or dy):
+                    continue
+                q = affinity.translate(cur, dx, dy)
+                if not (x0 - 0.5 * Wd <= q.centroid.x <= x1 + 0.5 * Wd):
+                    continue
+                dd = ownu.distance(q)
+                if dd > d0 + 1.5 * Hd or dd < min(d0, 0.3 * Hd):
+                    continue
+                sc = clear(q) - 0.15 * math.hypot(dx, dy)
+                if sc > best[0]:
+                    best = (sc, dx, dy)
+        if best[0] - base < gain * Hd:
+            continue
+        for m in parts:
+            m['dx'] += best[1]; m['dy'] += best[2]
+            m['poly'] = affinity.translate(m['poly'], best[1], best[2])
+        moved.append(('dot', parts[0]['ch'], parts[0]['word']))
+    # a dot squeezed onto its own letter (the ز dot of زن, fitted between the ز and the ن)
+    # is lifted clear of it, onto the height of the neighbouring dots, so it lines up
+    # with them as a calligrapher's dots do, instead of hugging the stroke
+    cy = {g: unary_union([m['poly'] for m in ps]).centroid for g, ps in units.items()}
+    for g, parts in units.items():
+        body = [o['poly'] for o in byg[g] if all(o is not m for m in parts)]
+        if not body:
+            continue
+        ownu = unary_union(body)
+        cur = unary_union([m['poly'] for m in parts])
+        if ownu.distance(cur) >= 0.35 * Hd:
+            continue
+        up = cur.centroid.y >= ownu.centroid.y; sg = 1 if up else -1
+        others = unary_union([o['poly'] for o in ink if o['g'] != g and (o['poly'].area >= 0.5 * A or o['mark'])])
+        x0, _, x1, _ = ownu.bounds
+        peers = [c.y for h, c in cy.items() if h != g and abs(c.x - cur.centroid.x) <= 4 * Wd
+                 and (c.y - cur.centroid.y) * sg > 0]
+        best = None
+        # anywhere over the letter, hopping a crossing stroke if need be (up to 6 dot
+        # heights); kept 2 dot widths from any other letter's dots so it does not pair
+        # with them (ز's dot beside ن's would read as ت)
+        odots = [unary_union([m['poly'] for m in ps]) for h, ps in units.items() if h != g]
+        for i in range(-12, 5):
+            for j in range(1, 25):
+                dx, dy = i * Wd / 4, sg * j * Hd / 4
+                q = affinity.translate(cur, dx, dy)
+                if not (x0 - 0.5 * Wd <= q.centroid.x <= x1 + 0.5 * Wd):
+                    continue
+                if ownu.distance(q) < 0.6 * Hd or others.distance(q) < 0.9 * Hd \
+                        or any(d.distance(q) < 2.0 * Wd for d in odots):
+                    continue
+                align = min((abs(q.centroid.y - y) for y in peers), default=0)
+                cost = align + 0.3 * math.hypot(dx, dy)
+                if best is None or cost < best[0]:
+                    best = (cost, dx, dy)
+        if best is None:
+            continue
+        for m in parts:
+            m['dx'] += best[1]; m['dy'] += best[2]
+            m['poly'] = affinity.translate(m['poly'], best[1], best[2])
+        cy[g] = unary_union([m['poly'] for m in parts]).centroid
+        moved.append(('dot', parts[0]['ch'], parts[0]['word']))
+    return moved
 
 
 def shrink_tashkil(items, scale):
@@ -565,7 +697,7 @@ def line_svg(items):
 # ---------------------------------------------------------------- page layout
 
 def build(style, lines, author=None, rise='strong', cswh=True, keshideh=True,
-          equal=True, layout='auto', title='', desc='', dot_fix=True):
+          equal=True, layout='auto', title='', desc='', dot_fix=True, mashq=False):
     font = FONTS[style]
     if not font.exists():
         sys.exit(f'missing font {font}')
@@ -599,7 +731,11 @@ def build(style, lines, author=None, rise='strong', cswh=True, keshideh=True,
 
     built, line_items = [], []
     for t, g in zip(lines, gaps):
-        items = out.contours(pack_line(mask, t, g, rise=r, start=start), px)
+        if mashq:   # tight words, each climbing onto the end of the one before
+            pl = pack_line(mask, t, round(g * MASHQ['gap']), slope=MASHQ['slope'], maxtuck=MASHQ['tuck'])
+        else:
+            pl = pack_line(mask, t, g, rise=r, start=start)
+        items = out.contours(pl, px)
         shrink_tashkil(items, TASHKIL_SCALE)
         line_items.append(items)
         built.append(line_svg(items))
@@ -608,7 +744,9 @@ def build(style, lines, author=None, rise='strong', cswh=True, keshideh=True,
     stagger = layout == 'stagger' or (layout == 'auto' and len(lines) > 1)
     placed_lines, prev = [], None
     for k, (d, (x0, y0, x1, y1), poly) in enumerate(built):
-        if not stagger:
+        if mashq:   # right ends on one column; each line tucks under the one above
+            tx = 345 - x1 * s
+        elif not stagger:
             tx = 190 - (x1 - x0) * s / 2 - x0 * s
         elif k % 2 == 0:
             tx = 345 - x1 * s
@@ -616,6 +754,13 @@ def build(style, lines, author=None, rise='strong', cswh=True, keshideh=True,
             tx = 35 - x0 * s
         if prev is None:
             ty = 48 - y0 * s
+        elif mashq:
+            ty = prev['top'] - y0 * s
+            while True:
+                cur = affinity.affine_transform(poly, [s, 0, 0, s, tx, ty])
+                if all(cur.distance(p['poly']) >= MASHQ['lead'] for p in placed_lines):
+                    break
+                ty += 1
         else:
             ty = prev['bottom'] + 16 - y0 * s
             while True:
@@ -624,7 +769,8 @@ def build(style, lines, author=None, rise='strong', cswh=True, keshideh=True,
                     break
                 ty += 1
         cur = affinity.affine_transform(poly, [s, 0, 0, s, tx, ty])
-        prev = dict(d=d, tx=tx, ty=ty, s=s, cls='ink', bottom=ty + y1 * s, poly=cur, items=line_items[k])
+        prev = dict(d=d, tx=tx, ty=ty, s=s, cls='ink', bottom=ty + y1 * s, top=ty + y0 * s,
+                    poly=cur, items=line_items[k])
         placed_lines.append(prev)
 
     bottom = max(p['bottom'] for p in placed_lines)
@@ -647,7 +793,10 @@ def build(style, lines, author=None, rise='strong', cswh=True, keshideh=True,
             gi['poly'] = affinity.translate(affinity.scale(it['poly'], f, f, origin=(0, 0)),
                                             p['tx'] / s, -p['ty'] / s)
             page.append(gi)
-    moved, unresolved = settle(page, A, Wd, Hd) if dot_fix else ([], [])
+    moved, unresolved = settle(page, A, Wd, Hd, room=MASHQ['room'] if mashq else 0.5) if dot_fix else ([], [])
+    if mashq and dot_fix:
+        moved += [('spread ' + k, ch, w) for k, ch, w in spread_dots(page, A, Wd, Hd)]
+        unresolved = settle(page, A, Wd, Hd, passes=0)[1]   # judge the final places, not the stricter target
     for gi in page:
         if gi['dx'] or gi['dy']:
             gi['src']['dx'] += gi['dx'] / gi['f']; gi['src']['dy'] += gi['dy'] / gi['f']
@@ -688,6 +837,8 @@ def main():
     ap.add_argument('--no-keshideh', action='store_true', help='Nastaliq: no automatic keshideh')
     ap.add_argument('--no-equalize', action='store_true', help="don't match the two misra' lengths")
     ap.add_argument('--layout', choices=['auto', 'stagger', 'center'], default='auto')
+    ap.add_argument('--mashq', action='store_true',
+                    help='master-sheet flow: steep diagonal lines, tucked words, interlocking lines, dots spread into open space')
     ap.add_argument('--no-dot-fix', action='store_true', help='leave every dot and mark where the font puts it')
     ap.add_argument('--title', default='')
     ap.add_argument('--desc', default='')
@@ -701,7 +852,7 @@ def main():
     signal.alarm(a.timeout)
 
     svg, report = build(a.style, a.lines, a.author, a.rise, not a.no_cswh, not a.no_keshideh,
-                        not a.no_equalize, a.layout, a.title, a.desc, not a.no_dot_fix)
+                        not a.no_equalize, a.layout, a.title, a.desc, not a.no_dot_fix, a.mashq)
     Path(a.out).write_text(svg, encoding='utf-8')
     print(f'wrote {a.out}')
     if a.png:

@@ -20,7 +20,7 @@ python scripts/render.py --style shekasteh "بشنو این نی چون شکای
     --author "مولانا" --rise strong -o rumi-shekasteh.svg --png preview.png
 ```
 
-The script applies every rule in sections 4 to 7 and prints a report: the keshideh it chose, the gaps, and each dot or mark it moved. Check the PNG preview before you send anything (section 8). Options: `--rise flat|gentle|medium|strong|stronger`, `--no-cswh`, `--no-keshideh`, `--no-equalize`, `--layout auto|stagger|center`, `--dark` (preview only), `--title`, `--desc`. If you type a tatweel (ـ) yourself, the script uses it and skips automatic keshideh.
+The script applies every rule in sections 4 to 7 and prints a report: the keshideh it chose, the gaps, and each dot or mark it moved. Check the PNG preview before you send anything (section 8). Options: `--rise flat|gentle|medium|strong|stronger`, `--no-cswh`, `--no-keshideh`, `--no-equalize`, `--layout auto|stagger|center`, `--mashq` (section 4, Mashq), `--dark` (preview only), `--title`, `--desc`. If you type a tatweel (ـ) yourself, the script uses it and skips automatic keshideh.
 
 ## Output
 
@@ -94,8 +94,19 @@ No font reproduces a calligrapher's hand. Never hand-draw Arabic letters or join
 | **strong (default)** | **56** | **0.35** |
 | stronger | 72 | 0.30 (check visually) |
 
-- Don't tilt a whole misra' diagonally. Stack words into each other's bowls only if the user asks for a more hand-composed look.
+- Don't tilt a whole misra' diagonally by default. Use mashq (below) only if the user asks for a master's-sheet, more hand-composed look.
 - Dima's long final swashes (ن, ی) often run over the letter before them, so a mark on that letter (the madda of آ in آن, for one) can land on the swash. Section 6 handles this.
+
+### Mashq (opt-in, `--mashq`, either style)
+
+Imitates the flow of a master's practice sheet (siah-mashq style) as far as placing the font's own shapes allows. It suits Shekasteh most; for Nastaliq it is a less usual but valid option.
+
+- **Diagonal climb.** Every word is raised in proportion to its distance from the line start (0.24 px per px of word width, ~13°). Words stay upright; a steeper climb (0.32) looked stair-stepped.
+- **Tight, tucked words.** Gap × 0.6, and a word may slide up to 60% of its width over the end of the one before.
+- **Interlocking lines.** Right ends on one column; each line moves up into the space under the line above until their ink is 14 px apart. Closer (7 px) put one line's dots among the next line's letters.
+- **Dot room.** Dots must clear other ink by 0.9 dot heights (not 0.5). Then each letter's dots drift into the nearest open space, mostly vertically (at most ¼ dot width sideways; more slid ش's dots onto the ت and شکایت read «سکاثت»).
+- **Lift dots off their own letter.** A dot squeezed onto its own letter (ز of زن, fitted between the ز and the long ن stroke) is lifted clear, hopping a crossing stroke if needed (up to 6 dot heights), still over its letter, at the height of neighbouring dots, and at least 2 dot widths from other letters' dots so it does not pair with them (ز's dot beside ن's would read as ت).
+- **Out of reach:** the master's long swept strokes, words slanted along the climb, and dots used as free ornament far from their letter. These need drawn or reshaped letters; say so rather than fake them.
 
 ## 5. Word spacing by ink
 
@@ -117,10 +128,11 @@ Both fonts draw dots and marks (madda, hamza) inside each letter's glyph, so a n
 - **Marks:** only on آ أ إ ؤ ئ ۀ: the free contour of at most ~4 dots' area, smaller than half the letter's body, lying wholly above the body (below for إ). In IranNastaliq the alef of أ is a separate contour; moving it instead of the hamza detaches the ا from the ک (کأسا → «ا کسا»).
 - **No more dots than the letter has.** A dot group can't hold more dots than its letter carries (ف 1, ی 2, ش 3 …). IranNastaliq draws the ف head as a separate solid piece about two dots in size; since ف has one dot, that piece is the head, and moving it lifts the ف off the ر (آفرینش). The two dots of ی, drawn as one piece, remain eligible. Don't use "largest piece of its glyph" as the body test: the ی's dot pair is bigger than its tooth.
 - **Stay home.** A moved dot or mark must stay horizontally over its own letter and get no further from it than it started. Otherwise it changes the word: a ن dot pushed over the next د makes گوهرند read «گوهرنز». Don't require it to be nearer its own letter than to any other: Nastaliq hangs the ی's dots far below its tooth, right on a following ر (آفرینش), and they must still be movable.
-- **Trigger:** closer than half a dot's height to *another* letter's ink (slivers under 0.8 dot are ignored). Distance to its own letter is the designer's choice.
+- **Trigger:** closer than half a dot's height to *another* letter's ink (slivers under 0.5 dot are ignored; Dima's ب dot is only 0.74 dot, and at 0.8 the ش dots of بشنو were moved onto it). Distance to its own letter is the designer's choice.
 - **Move** until 1.4 × that clearance away. Dots search the whole circle, starting with the side away from their own letter, and move at most ~1.3 dot heights. Marks search ~3 dot heights, stay near their letter and keep at least 0.3 dot heights from it.
 - **Tashkil go through the same pass.** The font's mark glyphs (GDEF class 3), and the shadda and small alif inside the الله ligature, are drawn at 80% (`TASHKIL_SCALE`; harakat in a finer pen than the letters) and then checked against all ink, *their own letter included*, since they are separate glyphs. One mark glyph (a shadda with its vowel) moves as a unit, away from the nearest ink first, then around the circle: a kasra under a final م has to step sideways past the long tail. Dots treat tashkil as ink to clear.
 - **Move a letter's dots together.** All dots of one letter move as one group and keep their arrangement. Dima draws each dot of ش or ی as its own piece; moving them one by one merges them into a blob.
+- **Last resort for dots still on ink.** Dima draws the ت dots of نیستان on the sweep of its final ن. A dot still touching ink after the passes may hop over the stroke (up to 2.5 dot heights), still over its own letter.
 - **Never make it worse.** If no move clears it while staying with its letter, leave it where it is; the script reports it as `STILL CROWDED` so you can mention it.
 
 ## 7. Layout (viewBox 380 wide)

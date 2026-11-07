@@ -21,6 +21,8 @@ engine leaves out:
   all ink on the page and moves only the ones that collide, just far enough to clear it (a letter's
   dots move together). Tashkil go through the same pass, drawn in a slightly finer size and kept
   clear of all ink. Anything it can't clear cleanly is reported, not forced.
+- **Mashq mode** (`--mashq`): the flow of a master's practice sheet: lines climbing on a diagonal,
+  tight tucked words, interlocking lines, and dots spread into the open space.
 - **Bayt layout**: staggered misra', a half-size signature (raqam), and light/dark themes in one SVG.
 
 ## Samples
@@ -29,6 +31,13 @@ engine leaves out:
 |---|---|
 | **Saadi, Nastaliq** — keshideh on اعضـای<br><img src="samples/saadi-nastaliq.png" alt="Saadi Nastaliq"> | **Saadi, Nastaliq, dark mode**<br><img src="samples/saadi-nastaliq-dark.png" alt="Saadi Nastaliq dark"> |
 | **Rumi, Shekasteh, dark mode**<br><img src="samples/rumi-shekasteh-dark.png" alt="Rumi Shekasteh dark"> | **Bismillah, light tashkil** — بِسمِ الله الرَّحمن الرَّحیم<br><img src="samples/bismillah-tashkil-nastaliq.png" alt="Bismillah Nastaliq"> |
+
+**Mashq mode** (`--mashq`): lines climb on a diagonal, words tuck into each other, lines interlock, and
+dots are spaced into the open white, after the way a master writes a practice sheet:
+
+| | |
+|---|---|
+| **Rumi, Shekasteh, mashq**<br><img src="samples/rumi-mashq-shekasteh.png" alt="Rumi Shekasteh mashq"> | **Saadi, Nastaliq, mashq**<br><img src="samples/saadi-mashq-nastaliq.png" alt="Saadi Nastaliq mashq"> |
 
 The SVG source of each sample is in [`samples/`](samples/).
 
@@ -69,6 +78,7 @@ Each run prints what it did:
 | `--no-cswh` | Shekasteh: no fused letters (easier to read) |
 | `--no-keshideh` / `--no-equalize` | Nastaliq: no automatic keshideh / don't match the misra' lengths |
 | `--layout auto\|stagger\|center` | `auto`: one line is centred, two or more are staggered |
+| `--mashq` | master's-sheet flow: diagonal climb, tucked words, interlocking lines, dots spread into open space |
 | `--no-dot-fix` | leave every dot and mark where the font puts it (to compare) |
 | `--png FILE` `--dark` | PNG preview (light or dark) |
 | `--timeout SECONDS` | hard time limit (default 300) |
@@ -96,4 +106,5 @@ The code and docs are [MIT](LICENSE).
 
 The output is **typeset, not hand-written**. No font reproduces a calligrapher's hand. The renderer
 only places and moves the fonts' own shapes (whole words, whole dots, whole marks) and never draws
-letters itself.
+letters itself. Mashq mode imitates a master's spacing, flow and dot placement, but not the long
+swept strokes or slanted words of a hand-written sheet.
