@@ -83,6 +83,19 @@ Each run prints what it did:
 | `--png FILE` `--dark` | PNG preview (light or dark) |
 | `--timeout SECONDS` | hard time limit (default 300) |
 
+### Reproducing the samples
+
+Every image in `samples/` is built by [`scripts/make_samples.py`](scripts/make_samples.py), which
+records the exact text and options of each one:
+
+```bash
+python scripts/make_samples.py           # rebuild samples/
+python scripts/make_samples.py --check   # regression test: fresh renders vs samples/
+```
+
+After changing `render.py`, run `--check`. Only the samples you meant to change may differ; for
+each one that does, compare before/after crops of the changed region before accepting it.
+
 If you type a tatweel (ـ) yourself, the renderer uses your keshideh and skips the automatic one.
 
 ## Using it as a skill

@@ -149,6 +149,7 @@ Both fonts draw dots and marks (madda, hamza) inside each letter's glyph, so a n
 
 - Look at the PNG preview (`--png`). Check that no dot or mark touches another letter, every madda and hamza shows as its own shape, no ink touches another line, the stagger reads clearly, Nastaliq misra' are equal, the Shekasteh line end rises smoothly, gaps look even, and the signature reads visibly smaller than the body.
 - Check each word with a madda or hamza at 3× zoom. A mark lying on a swash reads as a thick blob, not as a collision.
+- **When changing the script** (fixing a reported issue, tuning a rule): fix only that issue, then run `python scripts/make_samples.py --check`. Every sample you did not mean to change must come out byte-identical; for each one that differs, look at before/after crops of the changed region. Tuning a rule for one word has silently moved dots in other words before. Prefer a page-level pass that checks all ink over a per-word rule.
 - Read the script's report: is the keshideh word sensible, and is every moved dot one that was really crowded? Compare before and after at normal size. If you can't see the difference, the fix is aimed at the wrong piece.
 - When the user is choosing between looks, build numbered variants, send a numbered side-by-side image plus each SVG, and keep the numbering going across rounds.
 
